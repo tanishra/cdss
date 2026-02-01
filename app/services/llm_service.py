@@ -66,7 +66,6 @@ class OpenAILLMProvider(BaseLLMProvider):
             
             response = await self.client.responses.create(
                 model=settings.OPENAI_MODEL,
-                max_tokens=settings.OPENAI_MAX_TOKENS,
                 temperature=settings.OPENAI_TEMPERATURE,
                 input=[{"role": "user", "content": prompt}]
             )
