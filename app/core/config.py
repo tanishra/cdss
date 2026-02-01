@@ -41,7 +41,6 @@ class Settings(BaseSettings):
     # OPENAI API
     OPENAI_API_KEY: str = Field(default="")
     OPENAI_MODEL: str = "gpt-4o-mini"
-    OPENAI_MAX_TOKENS: int = 4000
     OPENAI_TEMPERATURE: float = 0.1
     
     # Rate Limiting
