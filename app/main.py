@@ -111,7 +111,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "error": "Validation Error",
-            "detail": exc.errors(),
+            "detail": str(exc.errors()),
             "correlation_id": correlation_id,
             "timestamp": datetime.utcnow().isoformat(),
         },
