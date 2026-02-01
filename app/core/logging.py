@@ -73,6 +73,19 @@ class AuditLogger:
             action=action,
             correlation_id=correlation_id,
         )
+    
+    def log_authentication(self, doctor_id: str, action: str, success: bool, 
+                      ip_address: str, correlation_id: str) -> None:
+          """Log authentication event."""
+          self.logger.info(
+              "authentication",
+              event_type="security",
+              doctor_id=doctor_id,
+              action=action,
+              success=success,
+              ip_address=ip_address,
+              correlation_id=correlation_id,
+        )
 
 
 audit_logger = AuditLogger()
