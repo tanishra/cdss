@@ -18,7 +18,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def hash_password(password: str) -> str:
     """Hash a password."""
     try:
-        password = password[:72]
+        # Encode to bytes and truncate to 72 bytes for bcrypt
+        password_bytes = password.encode('utf-8')[:72]
+        password = password_bytes.decode('utf-8')
         return pwd_context.hash(password)
     except Exception as e:
         logger.error("password_hash_error", error=str(e))
