@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.schemas.schemas import DoctorRegister, DoctorLogin, Token, DoctorResponse
 from app.models.models import Doctor
 from app.utils.correlation import get_correlation_id
+from app.api.dependencies import get_current_doctor
 from app.core.logging import get_logger, audit_logger
 
 logger = get_logger(__name__)
