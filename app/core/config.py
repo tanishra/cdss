@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_TEMPERATURE: float = 0.1
 
-    # RAG Settings - NEW
+    # RAG 
     ENABLE_RAG: bool = True
     PUBMED_API_EMAIL: str = Field(
         default="your-email@example.com",
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
     EMBEDDINGS_MODEL: str = "all-MiniLM-L6-v2"
     
-    # Evidence Settings
+    # Evidence 
     MIN_EVIDENCE_SCORE: float = 0.7
     MAX_CITATIONS_PER_DIAGNOSIS: int = 3
     
