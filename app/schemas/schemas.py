@@ -199,10 +199,35 @@ class DiagnosisRequest(BaseModel):
         if not v:
             raise ValueError('At least one symptom is required')
         return v
+    
+class CitationBase(BaseModel):
+    """Base citation schema."""
+    pubmed_id: Optional[str] = None
+    title: str
+    authors: Optional[str] = None
+    journal: Optional[str] = None
+    publication_year: Optional[int] = None
+    doi: Optional[str] = None
+    citation_text: str
+    relevance_score: float
+    evidence_type: str  # "research", "guideline", "review"
+    abstract: Optional[str] = None
+    url: Optional[str] = None
 
 
-class DifferentialDiagnosis(BaseModel):
-    """Individual differential diagnosis schema."""
+class CitationResponse(CitationBase):
+    """Citation response schema."""
+    id: str
+    diagnosis_id: str
+    diagnosis_name: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class DifferentialDiagnosisWithEvidence(BaseModel):
+    """Enhanced differential diagnosis with evidence."""
     diagnosis: str
     confidence: float = Field(..., ge=0.0, le=1.0)
     icd10_code: str
@@ -210,22 +235,28 @@ class DifferentialDiagnosis(BaseModel):
     supporting_evidence: List[str]
     contradicting_factors: Optional[List[str]] = None
     rank: int
+    citations: List[CitationBase] = []
+    evidence_quality: str = "low"  # "low", "moderate", "high"
 
 
-class DiagnosisResponse(BaseModel):
-    """Diagnosis analysis response schema."""
+class DiagnosisResponseWithEvidence(BaseModel):
+    """Enhanced diagnosis response with RAG."""
     id: str
     patient_id: str
     correlation_id: str
     chief_complaint: str
     symptoms: List[Dict[str, Any]]
-    differential_diagnoses: List[DifferentialDiagnosis]
+    differential_diagnoses: List[DifferentialDiagnosisWithEvidence]
     clinical_reasoning: str
     missing_information: Optional[List[str]]
     red_flags: Optional[List[str]]
     recommended_tests: Optional[List[str]]
     recommended_treatments: Optional[List[str]]
     follow_up_instructions: Optional[str]
+    evidence_used: Optional[List[Dict[str, Any]]]
+    guidelines_applied: Optional[List[str]]
+    citation_count: int
+    rag_enabled: bool
     processing_time_ms: float
     confidence_level: str
     created_at: datetime
@@ -241,6 +272,52 @@ class DiagnosisFeedback(BaseModel):
     actual_rank: Optional[int] = Field(None, ge=1, le=5)
     feedback_notes: Optional[str] = None
 
+class DoctorFeedbackCreate(BaseModel):
+    """Doctor feedback creation schema."""
+    diagnosis_id: str
+    correct_diagnosis: str
+    was_in_top_5: bool
+    actual_rank: Optional[int] = Field(None, ge=1, le=5)
+    missing_symptoms: Optional[List[str]] = None
+    incorrect_symptoms: Optional[List[str]] = None
+    missing_tests: Optional[List[str]] = None
+    accuracy_rating: Optional[int] = Field(None, ge=1, le=5)
+    reasoning_quality: Optional[int] = Field(None, ge=1, le=5)
+    recommendations_quality: Optional[int] = Field(None, ge=1, le=5)
+    overall_satisfaction: Optional[int] = Field(None, ge=1, le=5)
+    feedback_notes: Optional[str] = None
+    would_use_again: Optional[bool] = None
+    treatment_given: Optional[str] = None
+    patient_outcome: Optional[str] = None  # "improved", "stable", "worsened"
+
+
+class DoctorFeedbackResponse(DoctorFeedbackCreate):
+    """Doctor feedback response schema."""
+    id: str
+    doctor_id: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class FeedbackStats(BaseModel):
+    """Feedback statistics schema."""
+    total_feedbacks: int
+    average_accuracy: float
+    top_5_accuracy: float  
+    average_satisfaction: float
+    would_use_again_percentage: float
+    common_issues: List[Dict[str, Any]]
+
+
+class RAGConfig(BaseModel):
+    """RAG configuration for diagnosis."""
+    enable_rag: bool = True
+    max_pubmed_results: int = 10
+    min_evidence_score: float = 0.7
+    include_guidelines: bool = True
+    evidence_types: List[str] = ["research", "guideline", "review"]
 
 # ============================================================================
 # COMMON SCHEMAS
