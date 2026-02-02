@@ -155,11 +155,17 @@ class Diagnosis(Base):
     recommended_tests = Column(JSON)
     recommended_treatments = Column(JSON)
     follow_up_instructions = Column(Text)
+
+    # RAG-specific fields
+    evidence_used = Column(JSON) 
+    guidelines_applied = Column(JSON)  
+    citation_count = Column(Integer, default=0)  
     
     # Performance Metrics
     processing_time_ms = Column(Float)
     llm_model_used = Column(String)
     llm_tokens_used = Column(Integer)
+    rag_enabled = Column(Boolean, default=False)
     
     # Doctor Feedback - Dependency Inversion: Depends on abstraction
     doctor_feedback = Column(JSON)
@@ -174,6 +180,8 @@ class Diagnosis(Base):
     # Relationships
     patient = relationship("Patient", back_populates="diagnoses")
     doctor = relationship("Doctor", back_populates="diagnoses")
+    citations = relationship("Citation", back_populates="diagnosis", cascade="all, delete-orphan")  
+    feedbacks = relationship("DoctorFeedback", back_populates="diagnosis", cascade="all, delete-orphan")
     
     # Indexes
     __table_args__ = (
@@ -185,7 +193,102 @@ class Diagnosis(Base):
     
     def __repr__(self) -> str:
         return f"<Diagnosis(id={self.id}, patient_id={self.patient_id})>"
+    
+class Citation(Base):
+    """
+    Citation Model - Stores medical literature references
+    """
+    __tablename__ = "citations"
+    
+    id = Column(String, primary_key=True, default=generate_uuid)
+    diagnosis_id = Column(String, ForeignKey("diagnoses.id"), nullable=False)
+    
+    # PubMed Article Info
+    pubmed_id = Column(String, index=True)  # PMID
+    title = Column(Text, nullable=False)
+    authors = Column(Text)
+    journal = Column(String)
+    publication_year = Column(Integer)
+    doi = Column(String)
+    
+    # Citation Details
+    citation_text = Column(Text)  
+    relevance_score = Column(Float)  
+    evidence_type = Column(String)  
+    
+    # Content
+    abstract = Column(Text)
+    url = Column(String)
+    
+    # Association
+    diagnosis_name = Column(String)  
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    diagnosis = relationship("Diagnosis", back_populates="citations")
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_citation_diagnosis', 'diagnosis_id'),
+        Index('idx_citation_pubmed', 'pubmed_id'),
+    )
+    
+    def __repr__(self) -> str:
+        return f"<Citation(id={self.id}, pubmed_id={self.pubmed_id})>"
+    
 
+class DoctorFeedback(Base):
+    """
+    NEW: Doctor Feedback Model - Stores doctor's assessment of diagnosis
+    """
+    __tablename__ = "doctor_feedbacks"
+    
+    id = Column(String, primary_key=True, default=generate_uuid)
+    diagnosis_id = Column(String, ForeignKey("diagnoses.id"), nullable=False)
+    doctor_id = Column(String, ForeignKey("doctors.id"), nullable=False)
+    
+    # Feedback Data
+    correct_diagnosis = Column(String, nullable=False)  
+    was_in_top_5 = Column(Boolean, nullable=False)
+    actual_rank = Column(Integer)  
+    
+    # Detailed Feedback
+    missing_symptoms = Column(JSON)  
+    incorrect_symptoms = Column(JSON)  
+    missing_tests = Column(JSON)  
+    
+    # Quality Ratings (1-5)
+    accuracy_rating = Column(Integer)
+    reasoning_quality = Column(Integer)
+    recommendations_quality = Column(Integer)
+    overall_satisfaction = Column(Integer)
+    
+    # Comments
+    feedback_notes = Column(Text)
+    would_use_again = Column(Boolean)
+    
+    # Treatment Outcome (optional, follow-up)
+    treatment_given = Column(String)
+    patient_outcome = Column(String)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    diagnosis = relationship("Diagnosis", back_populates="feedbacks")
+    doctor = relationship("Doctor")
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_feedback_diagnosis', 'diagnosis_id'),
+        Index('idx_feedback_doctor', 'doctor_id'),
+        Index('idx_feedback_created', 'created_at'),
+    )
+    
+    def __repr__(self) -> str:
+        return f"<DoctorFeedback(id={self.id}, diagnosis_id={self.diagnosis_id})>"
 
 class AuditLog(Base):
     """
