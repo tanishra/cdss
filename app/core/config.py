@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     
     # Application
     APP_NAME: str = "Clinical Decision Support System"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "1.0.1"
     DEBUG: bool = False
     ENVIRONMENT: str = "production"
     
@@ -42,6 +42,20 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(default="")
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_TEMPERATURE: float = 0.1
+
+    # RAG Settings - NEW
+    ENABLE_RAG: bool = True
+    PUBMED_API_EMAIL: str = Field(
+        default="your-email@example.com",
+        description="Email for PubMed API (required by NCBI)"
+    )
+    PUBMED_MAX_RESULTS: int = 10
+    CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
+    EMBEDDINGS_MODEL: str = "all-MiniLM-L6-v2"
+    
+    # Evidence Settings
+    MIN_EVIDENCE_SCORE: float = 0.7
+    MAX_CITATIONS_PER_DIAGNOSIS: int = 3
     
     # Rate Limiting
     RATE_LIMIT_REQUESTS: int = 100
