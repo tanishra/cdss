@@ -1,6 +1,5 @@
 """
-Patient and Diagnosis Routes Module - Following SOLID Principles
-Interface Segregation: Separate routes for different resources
+Patient and Diagnosis Routes Module - UPDATED with RAG
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +10,8 @@ from app.schemas.schemas import (
     PatientCreate,
     PatientResponse,
     DiagnosisRequest,
-    DiagnosisResponse,
+    DiagnosisResponseWithEvidence, 
+    DifferentialDiagnosisWithEvidence, 
 )
 from app.services.patient_service import patient_service, PatientServiceError
 from app.services.diagnosis_service import diagnosis_service, DiagnosisServiceError
@@ -21,22 +21,16 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Create separate routers - Interface Segregation Principle
+# Create separate routers
 patient_router = APIRouter(prefix="/patients", tags=["patients"])
 diagnosis_router = APIRouter(prefix="/diagnosis", tags=["diagnosis"])
 
 
 # ============================================================================
-# PATIENT ROUTES - Single Responsibility Principle
+# PATIENT ROUTES (Keep existing as is)
 # ============================================================================
 
-@patient_router.post(
-    "/",
-    response_model=PatientResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create patient",
-    description="Create a new patient record with complete medical history",
-)
+@patient_router.post("/", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
 async def create_patient(
     patient_data: PatientCreate,
     db: AsyncSession = Depends(get_db),
@@ -44,11 +38,7 @@ async def create_patient(
     _: bool = Depends(check_rate_limit),
     request: Request = None,
 ):
-    """
-    Create new patient record.
-    
-    Single Responsibility: Patient creation endpoint
-    """
+    """Create new patient record."""
     correlation_id = get_correlation_id(request)
     
     try:
@@ -69,15 +59,8 @@ async def create_patient(
         return patient
         
     except PatientServiceError as e:
-        logger.error(
-            "patient_creation_failed",
-            error=str(e),
-            correlation_id=correlation_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        logger.error("patient_creation_failed", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(
             "patient_creation_unexpected_error",
@@ -91,23 +74,14 @@ async def create_patient(
         )
 
 
-@patient_router.get(
-    "/{patient_id}",
-    response_model=PatientResponse,
-    summary="Get patient",
-    description="Get patient details by ID",
-)
+@patient_router.get("/{patient_id}", response_model=PatientResponse)
 async def get_patient(
     patient_id: str,
     db: AsyncSession = Depends(get_db),
     current_doctor: Doctor = Depends(get_current_doctor),
     request: Request = None,
 ):
-    """
-    Get patient by ID.
-    
-    Single Responsibility: Patient retrieval endpoint
-    """
+    """Get patient by ID."""
     correlation_id = get_correlation_id(request)
     
     try:
@@ -119,32 +93,14 @@ async def get_patient(
         )
         
         if not patient:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Patient not found",
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
         
         return patient
         
     except HTTPException:
         raise
     except PatientServiceError as e:
-        logger.error(
-            "patient_retrieval_failed",
-            error=str(e),
-            correlation_id=correlation_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve patient",
-        )
-    except Exception as e:
-        logger.error(
-            "patient_retrieval_unexpected_error",
-            error=str(e),
-            error_type=type(e).__name__,
-            correlation_id=correlation_id,
-        )
+        logger.error("patient_retrieval_failed", error=str(e), correlation_id=correlation_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve patient",
@@ -152,23 +108,24 @@ async def get_patient(
 
 
 # ============================================================================
-# DIAGNOSIS ROUTES - Single Responsibility Principle
+# DIAGNOSIS ROUTES - UPDATED WITH RAG
 # ============================================================================
 
 @diagnosis_router.post(
     "/analyze",
-    response_model=DiagnosisResponse,
+    response_model=DiagnosisResponseWithEvidence,
     status_code=status.HTTP_201_CREATED,
-    summary="Generate diagnosis",
+    summary="Generate AI-powered diagnosis with medical evidence",
     description="""
-    Analyze patient symptoms and generate AI-powered differential diagnosis.
+    Generate evidence-based differential diagnosis using RAG (Retrieval-Augmented Generation).
     
-    Returns top 5 most likely diagnoses with:
-    - Confidence scores
-    - Clinical reasoning
-    - Recommended tests
-    - Treatment suggestions
-    - Follow-up instructions
+    **NEW Features:**
+    - Medical literature citations from PubMed
+    - Clinical practice guidelines
+    - Evidence quality scoring
+    - Source attribution for each diagnosis
+    
+    Returns top 5 differential diagnoses with supporting evidence.
     """,
 )
 async def analyze_symptoms(
@@ -179,32 +136,30 @@ async def analyze_symptoms(
     request: Request = None,
 ):
     """
-    Generate differential diagnosis using AI.
+    Generate evidence-based differential diagnosis.
     
-    Single Responsibility: Diagnosis generation endpoint
-    
-    Process:
-    1. Validate patient exists and belongs to doctor
-    2. Gather patient history and demographics
-    3. Use Claude AI to generate top 5 differential diagnoses
-    4. Provide clinical reasoning and recommendations
-    5. Log audit trail
+    This endpoint now includes:
+    1. Medical literature search (PubMed)
+    2. Vector similarity search (past cases)
+    3. Clinical guideline integration
+    4. Citation tracking
     """
     correlation_id = get_correlation_id(request)
     
     try:
         logger.info(
-            "diagnosis_request_received",
+            "diagnosis_request_received_with_rag",
             patient_id=diagnosis_request.patient_id,
             doctor_id=current_doctor.id,
             chief_complaint=diagnosis_request.chief_complaint,
             symptoms_count=len(diagnosis_request.symptoms),
             has_vitals=diagnosis_request.vital_signs is not None,
             has_labs=diagnosis_request.lab_results is not None,
+            rag_enabled=True,
             correlation_id=correlation_id,
         )
         
-        # Generate diagnosis
+        # Generate diagnosis with RAG
         diagnosis = await diagnosis_service.create_diagnosis(
             db=db,
             request=diagnosis_request,
@@ -212,45 +167,79 @@ async def analyze_symptoms(
             correlation_id=correlation_id,
         )
         
-        # Transform to response model
-        response = DiagnosisResponse(
+        # Transform to response model with evidence
+        differential_diagnoses_with_evidence = []
+        
+        for dx in diagnosis.differential_diagnoses:
+            # Get citations for this diagnosis
+            citations = [
+                {
+                    "pubmed_id": c.pubmed_id,
+                    "title": c.title,
+                    "authors": c.authors,
+                    "journal": c.journal,
+                    "publication_year": c.publication_year,
+                    "doi": c.doi,
+                    "citation_text": c.citation_text,
+                    "relevance_score": c.relevance_score,
+                    "evidence_type": c.evidence_type,
+                    "abstract": c.abstract,
+                    "url": c.url,
+                }
+                for c in diagnosis.citations
+                if c.diagnosis_name == dx.get("diagnosis")
+            ]
+            
+            dx_with_evidence = DifferentialDiagnosisWithEvidence(
+                diagnosis=dx.get("diagnosis"),
+                confidence=dx.get("confidence"),
+                icd10_code=dx.get("icd10_code"),
+                reasoning=dx.get("reasoning"),
+                supporting_evidence=dx.get("supporting_evidence", []),
+                contradicting_factors=dx.get("contradicting_factors"),
+                rank=dx.get("rank"),
+                citations=citations,
+                evidence_quality=_calculate_evidence_quality(citations),
+            )
+            
+            differential_diagnoses_with_evidence.append(dx_with_evidence)
+        
+        response = DiagnosisResponseWithEvidence(
             id=diagnosis.id,
             patient_id=diagnosis.patient_id,
             correlation_id=diagnosis.correlation_id,
             chief_complaint=diagnosis.chief_complaint,
             symptoms=diagnosis.symptoms,
-            differential_diagnoses=diagnosis.differential_diagnoses,
+            differential_diagnoses=differential_diagnoses_with_evidence,
             clinical_reasoning=diagnosis.clinical_reasoning,
             missing_information=diagnosis.missing_information,
             red_flags=diagnosis.red_flags,
             recommended_tests=diagnosis.recommended_tests,
             recommended_treatments=diagnosis.recommended_treatments,
             follow_up_instructions=diagnosis.follow_up_instructions,
+            evidence_used=diagnosis.evidence_used,
+            guidelines_applied=diagnosis.guidelines_applied,
+            citation_count=diagnosis.citation_count,
+            rag_enabled=diagnosis.rag_enabled,
             processing_time_ms=diagnosis.processing_time_ms,
             confidence_level=_calculate_confidence_level(diagnosis.differential_diagnoses),
             created_at=diagnosis.created_at,
         )
         
         logger.info(
-            "diagnosis_generated_successfully",
+            "diagnosis_generated_successfully_with_evidence",
             diagnosis_id=diagnosis.id,
             top_diagnosis=diagnosis.differential_diagnoses[0]["diagnosis"] if diagnosis.differential_diagnoses else None,
-            confidence=diagnosis.differential_diagnoses[0]["confidence"] if diagnosis.differential_diagnoses else None,
+            citation_count=diagnosis.citation_count,
+            rag_enabled=diagnosis.rag_enabled,
             correlation_id=correlation_id,
         )
         
         return response
         
     except DiagnosisServiceError as e:
-        logger.error(
-            "diagnosis_failed",
-            error=str(e),
-            correlation_id=correlation_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        logger.error("diagnosis_failed", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(
             "diagnosis_unexpected_error",
@@ -265,11 +254,7 @@ async def analyze_symptoms(
 
 
 def _calculate_confidence_level(differential_diagnoses: list) -> str:
-    """
-    Calculate overall confidence level from diagnoses.
-    
-    Single Responsibility: Confidence calculation helper
-    """
+    """Calculate overall confidence level."""
     if not differential_diagnoses:
         return "Low"
     
@@ -281,3 +266,23 @@ def _calculate_confidence_level(differential_diagnoses: list) -> str:
         return "Medium"
     else:
         return "Low"
+
+
+def _calculate_evidence_quality(citations: list) -> str:
+    """Calculate evidence quality based on citations."""
+    if not citations:
+        return "low"
+    
+    # Count high-quality sources
+    high_quality = sum(
+        1 for c in citations
+        if c.get("evidence_type") in ["guideline", "meta-analysis", "systematic_review"]
+        and c.get("relevance_score", 0) > 0.8
+    )
+    
+    if high_quality >= 2:
+        return "high"
+    elif high_quality >= 1 or len(citations) >= 3:
+        return "moderate"
+    else:
+        return "low"
