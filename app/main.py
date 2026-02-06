@@ -16,6 +16,7 @@ from app.core.database import init_db, close_db
 from app.core.cache import cache_manager
 from app.api.auth import router as auth_router
 from app.api.routes import patient_router, diagnosis_router
+from app.api.feedback import router as feedback_router
 from app.schemas.schemas import HealthCheck
 from app.utils.correlation import get_correlation_id
 
@@ -145,7 +146,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(patient_router, prefix=settings.API_PREFIX)
 app.include_router(diagnosis_router, prefix=settings.API_PREFIX)
-
+app.include_router(feedback_router, prefix=settings.API_PREFIX)
 
 @app.get("/health", response_model=HealthCheck)
 async def health_check():
