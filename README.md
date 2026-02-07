@@ -185,33 +185,6 @@ curl -X POST http://localhost:8000/api/v1/diagnosis/analyze \
 - Treatment suggestions
 - Red flags/warnings
 
-## Testing
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=app tests/
-
-# Run specific test
-pytest tests/test_api.py::test_health_check -v
-```
-
-## Database Schema
-
-### Tables
-
-- **doctors** - Doctor accounts and authentication
-- **patients** - Patient records with medical history
-- **diagnoses** - Diagnosis records with AI analysis
-- **audit_logs** - Complete audit trail
-
-### Relationships
-
-- Doctor → Patients (One-to-Many)
-- Doctor → Diagnoses (One-to-Many)
-- Patient → Diagnoses (One-to-Many)
-
 ## Configuration
 
 Key environment variables:
