@@ -230,34 +230,6 @@ ruff check app/
 tail -f logs/app.log
 ```
 
-## Security Features
-
-- Password hashing with bcrypt
-- JWT token authentication
-- Rate limiting per user
-- SQL injection prevention (ORM)
-- Input validation (Pydantic)
-- Audit logging for compliance
-- CORS configuration
-
-## Logging
-
-All logs are structured JSON format with:
-- Timestamp
-- Log level
-- Correlation ID (request tracking)
-- Contextual information
-
-Logs are stored in `logs/app.log` and console.
-
-## Error Handling
-
-- Comprehensive try-except blocks
-- Specific exception types
-- User-friendly error messages
-- Detailed error logging
-- Correlation IDs for debugging
-
 ## Monitoring
 
 - Health check endpoint: `/health`
