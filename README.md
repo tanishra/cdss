@@ -230,14 +230,6 @@ ruff check app/
 tail -f logs/app.log
 ```
 
-## Monitoring
-
-- Health check endpoint: `/health`
-- Database connection monitoring
-- Redis connection monitoring
-- Request/response timing
-- Error rate tracking
-
 ## Troubleshooting
 
 ### Database connection error
