@@ -257,30 +257,6 @@ ruff check app/
 tail -f logs/app.log
 ```
 
-## Production Deployment
-
-### Using Docker
-```bash
-# Build and run
-docker-compose up -d
-
-# View logs
-docker-compose logs -f app
-
-# Stop services
-docker-compose down
-```
-
-### Manual Deployment
-
-1. Set `DEBUG=False` in `.env`
-2. Set strong `SECRET_KEY`
-3. Configure production database
-4. Use production-grade web server (Gunicorn)
-5. Setup reverse proxy (Nginx)
-6. Enable HTTPS/TLS
-7. Configure monitoring
-
 ## Security Features
 
 - Password hashing with bcrypt
