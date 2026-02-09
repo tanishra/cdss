@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
     LOG_FILE: str = "logs/app.log"
+
+    # Hugging Face
+    HF_TOKEN: str = Field(default="")
+
     
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
@@ -79,6 +83,11 @@ class Settings(BaseSettings):
             raise ValueError("SECRET_KEY must be at least 32 characters long")
         return v
     
+    @field_validator("HF_TOKEN")
+    def validate_hf_token(cls, v: str) -> str:
+        if not v:
+            raise ValueError("HF_TOKEN is required for embeddings service")
+        return v
     class Config:
         env_file = ".env"
         case_sensitive = True
