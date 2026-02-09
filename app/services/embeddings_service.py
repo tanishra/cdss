@@ -36,7 +36,10 @@ class EmbeddingsService:
         try:
             # Initialize sentence transformer model
             logger.info("embeddings_model_loading", model=settings.EMBEDDINGS_MODEL)
-            self.model = SentenceTransformer(settings.EMBEDDINGS_MODEL)
+            self.model = SentenceTransformer(
+                settings.EMBEDDINGS_MODEL,
+                token=settings.HF_TOKEN
+                )
             logger.info("embeddings_model_loaded")
             
             # Initialize ChromaDB
