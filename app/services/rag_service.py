@@ -107,9 +107,11 @@ class RAGService:
             
             # Store new PubMed articles in vector DB for future use
             if pubmed_results:
-                asyncio.create_task(
-                    self._index_new_articles(pubmed_results, correlation_id)
-                )
+                try:
+                    # Run synchronously instead of background task to avoid greenlet error
+                    await self._index_new_articles(pubmed_results, correlation_id)
+                except Exception as e:
+                    logger.warning("article_indexing_failed_non_critical", error=str(e))
             
             logger.info(
                 "rag_evidence_retrieval_complete",
