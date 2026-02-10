@@ -92,7 +92,6 @@ class LLMService:
                     }
                 ],
                 temperature=settings.OPENAI_TEMPERATURE,
-                max_tokens=settings.OPENAI_MAX_TOKENS,
                 response_format={"type": "json_object"}  # Force JSON response
             )
             
