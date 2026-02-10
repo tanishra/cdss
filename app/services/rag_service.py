@@ -105,14 +105,6 @@ class RAGService:
                 guidelines=guidelines
             )
             
-            # Store new PubMed articles in vector DB for future use
-            if pubmed_results:
-                try:
-                    # Run synchronously instead of background task to avoid greenlet error
-                    await self._index_new_articles(pubmed_results, correlation_id)
-                except Exception as e:
-                    logger.warning("article_indexing_failed_non_critical", error=str(e))
-            
             logger.info(
                 "rag_evidence_retrieval_complete",
                 pubmed_count=len(pubmed_results),
@@ -122,6 +114,36 @@ class RAGService:
                 correlation_id=correlation_id,
             )
             
+            # Index new articles synchronously
+            if pubmed_results:
+                try:
+                    documents = []
+                    for article in pubmed_results:
+                        pmid = article.get("pubmed_id")
+                        if not pmid:
+                            continue
+            
+                        text = f"{article.get('title', '')} {article.get('abstract', '')}"
+                        doc = {
+                            "id": f"pubmed_{pmid}",
+                            "text": text,
+                            "metadata": {
+                                "pubmed_id": pmid,
+                                "title": article.get("title", ""),
+                                "authors": article.get("authors", ""),
+                                "journal": article.get("journal", ""),
+                                "publication_year": article.get("publication_year"),
+                                "url": article.get("url", ""),
+                                "evidence_type": article.get("evidence_type", "research")
+                            }
+                        }
+                        documents.append(doc)
+        
+                    if documents:
+                        embeddings_service.add_documents(documents, correlation_id)
+                except Exception as e:
+                    logger.warning("article_indexing_failed", error=str(e)) 
+
             return {
                 "evidence": combined_evidence,
                 "sources": {
