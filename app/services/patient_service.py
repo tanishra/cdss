@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
-
+from typing import List
 from app.models.models import Patient
 from app.schemas.schemas import PatientCreate
 from app.core.logging import get_logger, audit_logger
@@ -127,6 +127,40 @@ class PatientService:
             alcohol_consumption=patient_data.alcohol_consumption.value if patient_data.alcohol_consumption else None,
             notes=patient_data.notes,
         )
+    
+    async def list_patients(
+            self,
+            db: AsyncSession,
+            doctor_id: str,
+            skip: int = 0,
+            limit: int = 100,
+            correlation_id: str = "",
+            ) -> List[Patient]:
+            """List all patients for a doctor."""
+            try:
+                result = await db.execute(
+                    select(Patient).where(
+                    Patient.doctor_id == doctor_id,
+                    Patient.is_active == True
+                    )
+                    .order_by(Patient.created_at.desc())
+                    .offset(skip)
+                    .limit(limit)
+                )
+                patients = result.scalars().all()
+        
+                logger.info(
+                "patients_listed",
+                count=len(patients),
+                doctor_id=doctor_id,
+                correlation_id=correlation_id,
+                )
+        
+                return patients
+        
+            except Exception as e:
+                logger.error("list_patients_error", error=str(e), correlation_id=correlation_id)
+                raise PatientServiceError(f"Failed to list patients: {str(e)}") from e
 
 
 # Global instance
