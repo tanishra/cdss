@@ -3,7 +3,7 @@ Patient and Diagnosis Routes Module - UPDATED with RAG
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from typing import List
 from app.core.database import get_db
 from app.api.dependencies import get_current_doctor, check_rate_limit
 from app.schemas.schemas import (
@@ -106,6 +106,34 @@ async def get_patient(
             detail="Failed to retrieve patient",
         )
 
+@patient_router.get("/", response_model=List[PatientResponse])
+async def list_patients(
+    skip: int = 0,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """List all patients for current doctor."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        patients = await patient_service.list_patients(
+            db=db,
+            doctor_id=current_doctor.id,
+            skip=skip,
+            limit=limit,
+            correlation_id=correlation_id,
+        )
+        
+        return patients
+        
+    except PatientServiceError as e:
+        logger.error("list_patients_failed", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list patients",
+        )
 
 # ============================================================================
 # DIAGNOSIS ROUTES - UPDATED WITH RAG
