@@ -3,6 +3,7 @@ Patient and Diagnosis Routes Module - UPDATED with RAG
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import List
 from app.core.database import get_db
 from app.api.dependencies import get_current_doctor, check_rate_limit
@@ -279,7 +280,100 @@ async def analyze_symptoms(
             detail="Failed to generate diagnosis",
         )
 
-
+@diagnosis_router.get("/{diagnosis_id}", response_model=DiagnosisResponseWithEvidence)
+async def get_diagnosis(
+    diagnosis_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Get diagnosis by ID."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        # Get diagnosis
+        result = await db.execute(
+            select(Diagnosis).where(
+                Diagnosis.id == diagnosis_id,
+                Diagnosis.doctor_id == current_doctor.id
+            )
+        )
+        diagnosis = result.scalar_one_or_none()
+        
+        if not diagnosis:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Diagnosis not found"
+            )
+        
+        # Build response (same as analyze_symptoms)
+        differential_diagnoses_with_evidence = []
+        
+        for dx in diagnosis.differential_diagnoses:
+            citations_list = []
+            if diagnosis.evidence_used:
+                for evidence in diagnosis.evidence_used[:3]:
+                    citations_list.append({
+                        "pubmed_id": evidence.get("pubmed_id"),
+                        "title": evidence.get("title", ""),
+                        "authors": evidence.get("authors", ""),
+                        "journal": evidence.get("journal", ""),
+                        "publication_year": evidence.get("publication_year"),
+                        "doi": evidence.get("doi"),
+                        "citation_text": evidence.get("citation_text", ""),
+                        "relevance_score": evidence.get("relevance_score", 0.9),
+                        "evidence_type": evidence.get("evidence_type", "research"),
+                        "abstract": evidence.get("abstract", ""),
+                        "url": evidence.get("url", ""),
+                    })
+            
+            dx_with_evidence = DifferentialDiagnosisWithEvidence(
+                diagnosis=dx.get("diagnosis"),
+                confidence=dx.get("confidence"),
+                icd10_code=dx.get("icd10_code"),
+                reasoning=dx.get("reasoning"),
+                supporting_evidence=dx.get("supporting_evidence", []),
+                contradicting_factors=dx.get("contradicting_factors"),
+                rank=dx.get("rank"),
+                citations=citations_list,
+                evidence_quality=_calculate_evidence_quality(citations_list),
+            )
+            
+            differential_diagnoses_with_evidence.append(dx_with_evidence)
+        
+        response = DiagnosisResponseWithEvidence(
+            id=diagnosis.id,
+            patient_id=diagnosis.patient_id,
+            correlation_id=diagnosis.correlation_id,
+            chief_complaint=diagnosis.chief_complaint,
+            symptoms=diagnosis.symptoms,
+            differential_diagnoses=differential_diagnoses_with_evidence,
+            clinical_reasoning=diagnosis.clinical_reasoning,
+            missing_information=diagnosis.missing_information,
+            red_flags=diagnosis.red_flags,
+            recommended_tests=diagnosis.recommended_tests,
+            recommended_treatments=diagnosis.recommended_treatments,
+            follow_up_instructions=diagnosis.follow_up_instructions,
+            evidence_used=diagnosis.evidence_used,
+            guidelines_applied=diagnosis.guidelines_applied,
+            citation_count=diagnosis.citation_count,
+            rag_enabled=diagnosis.rag_enabled,
+            processing_time_ms=diagnosis.processing_time_ms,
+            confidence_level=_calculate_confidence_level(diagnosis.differential_diagnoses),
+            created_at=diagnosis.created_at,
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_diagnosis_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve diagnosis"
+        )
+    
 def _calculate_confidence_level(differential_diagnoses: list) -> str:
     """Calculate overall confidence level."""
     if not differential_diagnoses:
