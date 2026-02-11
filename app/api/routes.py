@@ -188,82 +188,81 @@ async def analyze_symptoms(
         )
         
         # Generate diagnosis with RAG
-        # diagnosis = await diagnosis_service.create_diagnosis(
-        #     db=db,
-        #     request=diagnosis_request,
-        #     doctor_id=current_doctor.id,
-        #     correlation_id=correlation_id,
-        # )
+        diagnosis = await diagnosis_service.create_diagnosis(
+            db=db,
+            request=diagnosis_request,
+            doctor_id=current_doctor.id,
+            correlation_id=correlation_id,
+        )
         
         # Transform to response model with evidence
-        # differential_diagnoses_with_evidence = []
+        differential_diagnoses_with_evidence = []
         
-        # for dx in diagnosis.differential_diagnoses:
-        #     # Get citations for this diagnosis
-        #     citations = [
-        #         {
-        #             "pubmed_id": c.pubmed_id,
-        #             "title": c.title,
-        #             "authors": c.authors,
-        #             "journal": c.journal,
-        #             "publication_year": c.publication_year,
-        #             "doi": c.doi,
-        #             "citation_text": c.citation_text,
-        #             "relevance_score": c.relevance_score,
-        #             "evidence_type": c.evidence_type,
-        #             "abstract": c.abstract,
-        #             "url": c.url,
-        #         }
-        #         for c in diagnosis.citations
-        #         if c.diagnosis_name == dx.get("diagnosis")
-        #     ]
+        for dx in diagnosis.differential_diagnoses:
+            # Get citations for this diagnosis
+            citations_list = []
+            if diagnosis.evidence_used:
+                for evidence in diagnosis.evidence_used[:3]:  # Top 3
+                    citations_list.append({
+                        "pubmed_id": evidence.get("pubmed_id"),
+                        "title": evidence.get("title", ""),
+                        "authors": evidence.get("authors", ""),
+                        "journal": evidence.get("journal", ""),
+                        "publication_year": evidence.get("publication_year"),
+                        "doi": evidence.get("doi"),
+                        "citation_text": evidence.get("citation_text", ""),
+                        "relevance_score": evidence.get("relevance_score", 0.9),
+                        "evidence_type": evidence.get("evidence_type", "research"),
+                        "abstract": evidence.get("abstract", ""),
+                        "url": evidence.get("url", ""),
+                    })
             
-            # dx_with_evidence = DifferentialDiagnosisWithEvidence(
-            #     diagnosis=dx.get("diagnosis"),
-            #     confidence=dx.get("confidence"),
-            #     icd10_code=dx.get("icd10_code"),
-            #     reasoning=dx.get("reasoning"),
-            #     supporting_evidence=dx.get("supporting_evidence", []),
-            #     contradicting_factors=dx.get("contradicting_factors"),
-            #     rank=dx.get("rank"),
-            #     citations=citations,
-            #     evidence_quality=_calculate_evidence_quality(citations),
-            # )
+            dx_with_evidence = DifferentialDiagnosisWithEvidence(
+                diagnosis=dx.get("diagnosis"),
+                confidence=dx.get("confidence"),
+                icd10_code=dx.get("icd10_code"),
+                reasoning=dx.get("reasoning"),
+                supporting_evidence=dx.get("supporting_evidence", []),
+                contradicting_factors=dx.get("contradicting_factors"),
+                rank=dx.get("rank"),
+                citations=citations_list,
+                evidence_quality=_calculate_evidence_quality(citations_list),
+            )
             
-            # differential_diagnoses_with_evidence.append(dx_with_evidence)
+            differential_diagnoses_with_evidence.append(dx_with_evidence)
         
-        # response = DiagnosisResponseWithEvidence(
-        #     id=diagnosis.id,
-        #     patient_id=diagnosis.patient_id,
-        #     correlation_id=diagnosis.correlation_id,
-        #     chief_complaint=diagnosis.chief_complaint,
-        #     symptoms=diagnosis.symptoms,
-        #     differential_diagnoses=differential_diagnoses_with_evidence,
-        #     clinical_reasoning=diagnosis.clinical_reasoning,
-        #     missing_information=diagnosis.missing_information,
-        #     red_flags=diagnosis.red_flags,
-        #     recommended_tests=diagnosis.recommended_tests,
-        #     recommended_treatments=diagnosis.recommended_treatments,
-        #     follow_up_instructions=diagnosis.follow_up_instructions,
-        #     evidence_used=diagnosis.evidence_used,
-        #     guidelines_applied=diagnosis.guidelines_applied,
-        #     citation_count=diagnosis.citation_count,
-        #     rag_enabled=diagnosis.rag_enabled,
-        #     processing_time_ms=diagnosis.processing_time_ms,
-        #     confidence_level=_calculate_confidence_level(diagnosis.differential_diagnoses),
-        #     created_at=diagnosis.created_at,
-        # )
+        response = DiagnosisResponseWithEvidence(
+            id=diagnosis.id,
+            patient_id=diagnosis.patient_id,
+            correlation_id=diagnosis.correlation_id,
+            chief_complaint=diagnosis.chief_complaint,
+            symptoms=diagnosis.symptoms,
+            differential_diagnoses=differential_diagnoses_with_evidence,
+            clinical_reasoning=diagnosis.clinical_reasoning,
+            missing_information=diagnosis.missing_information,
+            red_flags=diagnosis.red_flags,
+            recommended_tests=diagnosis.recommended_tests,
+            recommended_treatments=diagnosis.recommended_treatments,
+            follow_up_instructions=diagnosis.follow_up_instructions,
+            evidence_used=diagnosis.evidence_used,
+            guidelines_applied=diagnosis.guidelines_applied,
+            citation_count=diagnosis.citation_count,
+            rag_enabled=diagnosis.rag_enabled,
+            processing_time_ms=diagnosis.processing_time_ms,
+            confidence_level=_calculate_confidence_level(diagnosis.differential_diagnoses),
+            created_at=diagnosis.created_at,
+        )
         
-        # logger.info(
-        #     "diagnosis_generated_successfully_with_evidence",
-        #     diagnosis_id=diagnosis.id,
-        #     top_diagnosis=diagnosis.differential_diagnoses[0]["diagnosis"] if diagnosis.differential_diagnoses else None,
-        #     citation_count=diagnosis.citation_count,
-        #     rag_enabled=diagnosis.rag_enabled,
-        #     correlation_id=correlation_id,
-        # )
+        logger.info(
+            "diagnosis_generated_successfully_with_evidence",
+            diagnosis_id=diagnosis.id,
+            top_diagnosis=diagnosis.differential_diagnoses[0]["diagnosis"] if diagnosis.differential_diagnoses else None,
+            citation_count=diagnosis.citation_count,
+            rag_enabled=diagnosis.rag_enabled,
+            correlation_id=correlation_id,
+        )
         
-        # return response
+        return response
         
     except DiagnosisServiceError as e:
         logger.error("diagnosis_failed", error=str(e), correlation_id=correlation_id)
