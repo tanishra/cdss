@@ -125,9 +125,10 @@ class DiagnosisService:
                     llm_result=llm_result,
                 )
             
-            # Step 8: Commit all changes
+            # Step 8: Add to db and commit all changes
+            db.add(diagnosis)
             await db.commit()
-            await db.refresh(diagnosis)
+            # await db.refresh(diagnosis)
             
             # Step 9: Audit logging
             await self._log_diagnosis(
