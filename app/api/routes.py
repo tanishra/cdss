@@ -16,7 +16,7 @@ from app.schemas.schemas import (
 )
 from app.services.patient_service import patient_service, PatientServiceError
 from app.services.diagnosis_service import diagnosis_service, DiagnosisServiceError
-from app.models.models import Doctor
+from app.models.models import Doctor, Diagnosis
 from app.utils.correlation import get_correlation_id
 from app.core.logging import get_logger
 
