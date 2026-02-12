@@ -16,7 +16,7 @@ from app.schemas.schemas import (
 )
 from app.services.patient_service import patient_service, PatientServiceError
 from app.services.diagnosis_service import diagnosis_service, DiagnosisServiceError
-from app.models.models import Doctor
+from app.models.models import Doctor, Diagnosis
 from app.utils.correlation import get_correlation_id
 from app.core.logging import get_logger
 
@@ -372,6 +372,97 @@ async def get_diagnosis(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve diagnosis"
+        )
+    
+@diagnosis_router.get("/patient/{patient_id}/history", response_model=List[DiagnosisResponseWithEvidence])
+async def get_patient_diagnosis_history(
+    patient_id: str,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Get all diagnoses for a patient."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        result = await db.execute(
+            select(Diagnosis)
+            .where(
+                Diagnosis.patient_id == patient_id,
+                Diagnosis.doctor_id == current_doctor.id
+            )
+            .order_by(Diagnosis.created_at.desc())
+            .limit(limit)
+        )
+        diagnoses = result.scalars().all()
+        
+        # Build response for each diagnosis
+        response_list = []
+        for diagnosis in diagnoses:
+            differential_diagnoses_with_evidence = []
+            
+            for dx in diagnosis.differential_diagnoses:
+                citations_list = []
+                if diagnosis.evidence_used:
+                    for evidence in diagnosis.evidence_used[:3]:
+                        citations_list.append({
+                            "pubmed_id": evidence.get("pubmed_id"),
+                            "title": evidence.get("title", ""),
+                            "authors": evidence.get("authors", ""),
+                            "journal": evidence.get("journal", ""),
+                            "publication_year": evidence.get("publication_year"),
+                            "doi": evidence.get("doi"),
+                            "citation_text": evidence.get("citation_text", ""),
+                            "relevance_score": evidence.get("relevance_score", 0.9),
+                            "evidence_type": evidence.get("evidence_type", "research"),
+                            "abstract": evidence.get("abstract", ""),
+                            "url": evidence.get("url", ""),
+                        })
+                
+                dx_with_evidence = DifferentialDiagnosisWithEvidence(
+                    diagnosis=dx.get("diagnosis"),
+                    confidence=dx.get("confidence"),
+                    icd10_code=dx.get("icd10_code"),
+                    reasoning=dx.get("reasoning"),
+                    supporting_evidence=dx.get("supporting_evidence", []),
+                    contradicting_factors=dx.get("contradicting_factors"),
+                    rank=dx.get("rank"),
+                    citations=citations_list,
+                    evidence_quality=_calculate_evidence_quality(citations_list),
+                )
+                differential_diagnoses_with_evidence.append(dx_with_evidence)
+            
+            response = DiagnosisResponseWithEvidence(
+                id=diagnosis.id,
+                patient_id=diagnosis.patient_id,
+                correlation_id=diagnosis.correlation_id,
+                chief_complaint=diagnosis.chief_complaint,
+                symptoms=diagnosis.symptoms,
+                differential_diagnoses=differential_diagnoses_with_evidence,
+                clinical_reasoning=diagnosis.clinical_reasoning,
+                missing_information=diagnosis.missing_information,
+                red_flags=diagnosis.red_flags,
+                recommended_tests=diagnosis.recommended_tests,
+                recommended_treatments=diagnosis.recommended_treatments,
+                follow_up_instructions=diagnosis.follow_up_instructions,
+                evidence_used=diagnosis.evidence_used,
+                guidelines_applied=diagnosis.guidelines_applied,
+                citation_count=diagnosis.citation_count,
+                rag_enabled=diagnosis.rag_enabled,
+                processing_time_ms=diagnosis.processing_time_ms,
+                confidence_level=_calculate_confidence_level(diagnosis.differential_diagnoses),
+                created_at=diagnosis.created_at,
+            )
+            response_list.append(response)
+        
+        return response_list
+        
+    except Exception as e:
+        logger.error("get_patient_history_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve diagnosis history"
         )
     
 def _calculate_confidence_level(differential_diagnoses: list) -> str:
