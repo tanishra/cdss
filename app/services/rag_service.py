@@ -5,7 +5,7 @@ Combines PubMed search, embeddings, and clinical guidelines
 from typing import List, Dict, Any, Optional
 import asyncio
 import json
-
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.pubmed_service import pubmed_service, PubMedServiceError
 from app.services.embeddings_service import embeddings_service, EmbeddingsServiceError
 from app.core.config import settings
