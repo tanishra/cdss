@@ -182,6 +182,10 @@ class Diagnosis(Base):
     doctor = relationship("Doctor", back_populates="diagnoses")
     citations = relationship("Citation", back_populates="diagnosis", cascade="all, delete-orphan")  
     feedbacks = relationship("DoctorFeedback", back_populates="diagnosis", cascade="all, delete-orphan")
+
+    lab_results_raw = Column(JSON)  # Raw uploaded lab data
+    lab_results_parsed = Column(JSON)  # Parsed and interpreted
+    lab_abnormalities = Column(JSON)  # Flagged abnormal values
     
     # Indexes
     __table_args__ = (
