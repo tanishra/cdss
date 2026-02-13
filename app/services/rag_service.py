@@ -104,6 +104,9 @@ class RAGService:
                 vector_results=vector_results,
                 guidelines=guidelines
             )
+
+            if db:  # Only if database session available
+                combined_evidence = await self._apply_feedback_boost(combined_evidence, db)
             
             logger.info(
                 "rag_evidence_retrieval_complete",
@@ -257,6 +260,30 @@ class RAGService:
         except Exception as e:
             logger.error("vectordb_retrieval_error", error=str(e))
             return []
+    
+    async def _apply_feedback_boost(
+            self, evidence: List[Dict], db: AsyncSession
+            ) -> List[Dict]:
+        """Boost evidence from sources that historically led to correct diagnoses."""
+        try:
+            from app.services.feedback_analytics_service import feedback_analytics_service
+        
+            # Get effectiveness scores
+            effectiveness = await feedback_analytics_service.get_evidence_effectiveness(db)
+        
+            # Boost relevance scores based on source effectiveness
+            for item in evidence:
+                journal = item.get("journal", "Unknown")
+                if journal in effectiveness:
+                    boost = effectiveness[journal]  # 0.0 to 1.0
+                    original_score = item.get("relevance_score", 0.5)
+                    # Apply 20% boost for highly effective sources
+                    item["relevance_score"] = min(1.0, original_score * (1 + boost * 0.2))
+        
+            return evidence
+        except Exception as e:
+            logger.warning("feedback_boost_failed", error=str(e))
+            return evidence
     
     async def _retrieve_guidelines(
         self, symptoms: List[str], correlation_id: str
