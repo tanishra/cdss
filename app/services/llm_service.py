@@ -6,6 +6,7 @@ import openai
 from openai import AsyncOpenAI
 import json
 import time
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -309,6 +310,31 @@ Return only the JSON object."""
         except ValueError as e:
             logger.error("llm_response_validation_error", error=str(e))
             raise LLMServiceError(f"Invalid LLM response structure: {str(e)}") from e
+    
+    async def _get_dynamic_prompt_additions(self, db: AsyncSession) -> str:
+        """Add prompt reminders based on common mistakes."""
+        try:
+            from app.services.feedback_analytics_service import feedback_analytics_service
+        
+            mistakes = await feedback_analytics_service.get_common_mistakes(db, limit=5)
+            missing_symptoms = await feedback_analytics_service.get_missing_symptoms_analysis(db)
+        
+            additions = "\n\n## Important Reminders Based on Past Feedback:\n"
+        
+            if mistakes:
+                additions += "\nCommonly missed diagnoses (consider these carefully):\n"
+                for mistake in mistakes:
+                    additions += f"- {mistake['diagnosis']} (missed {mistake['missed_count']} times)\n"
+        
+            if missing_symptoms:
+                additions += "\nCommonly overlooked symptoms to ask about:\n"
+                for symptom, count in list(missing_symptoms.items())[:5]:
+                    additions += f"- {symptom} ({count} times)\n"
+        
+            return additions
+        except Exception as e:
+            logger.warning("dynamic_prompt_failed", error=str(e))
+            return ""
 
 
 # Global instance
