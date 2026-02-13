@@ -43,6 +43,7 @@ class RAGService:
         patient_age: int,
         patient_gender: str,
         medical_history: Optional[Dict[str, Any]] = None,
+        db: Optional[AsyncSession] = None,
         correlation_id: str = ""
     ) -> Dict[str, Any]:
         """

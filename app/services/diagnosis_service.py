@@ -69,6 +69,7 @@ class DiagnosisService:
                         patient_age=patient_age,
                         patient_gender=patient.gender,
                         medical_history=medical_history,
+                        db=db,
                         correlation_id=correlation_id,
                     )
                     
