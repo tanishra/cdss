@@ -2,6 +2,7 @@
 Patient and Diagnosis Routes Module - UPDATED with RAG
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
@@ -463,6 +464,62 @@ async def get_patient_diagnosis_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve diagnosis history"
+        )
+
+
+@diagnosis_router.post("/upload-lab-report")
+async def upload_lab_report(
+    file: UploadFile = File(...),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Upload and parse lab report file."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        from app.services.ocr_service import ocr_service
+        from app.services.lab_parser_service import lab_parser_service
+        
+        # Validate file type
+        allowed_types = ['image/png', 'image/jpeg', 'application/pdf', 
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        'text/plain']
+        
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported file type: {file.content_type}"
+            )
+        
+        # Read file
+        file_bytes = await file.read()
+        
+        logger.info(
+            "lab_report_upload",
+            filename=file.filename,
+            file_size=len(file_bytes),
+            correlation_id=correlation_id,
+        )
+        
+        # Extract text
+        extracted_text = ocr_service.extract_text(file_bytes, file.filename)
+        
+        # Parse lab results
+        parsed = lab_parser_service.parse_lab_text(extracted_text)
+        
+        return {
+            "extracted_text": extracted_text,
+            "parsed_results": parsed.get("parsed_results", {}),
+            "abnormalities": parsed.get("abnormalities", []),
+            "total_tests": parsed.get("total_tests", 0),
+            "abnormal_count": parsed.get("abnormal_count", 0),
+        }
+        
+    except Exception as e:
+        logger.error("lab_report_upload_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process lab report: {str(e)}"
         )
     
 def _calculate_confidence_level(differential_diagnoses: list) -> str:
