@@ -11,6 +11,7 @@ import time
 from app.models.models import Patient, Diagnosis, Citation
 from app.services.llm_service import llm_service, LLMServiceError
 from app.services.rag_service import rag_service, RAGServiceError
+from app.services.lab_parser_service import lab_parser_service
 from app.schemas.schemas import DiagnosisRequest
 from app.core.config import settings
 from app.core.logging import get_logger, audit_logger
@@ -50,7 +51,32 @@ class DiagnosisService:
             # Step 3: Prepare medical history
             medical_history = self._prepare_medical_history(patient)
             
-            # Step 4: Retrieve evidence using RAG (if enabled)
+            # Step 4: Parse lab results if provided - MOVE THIS HERE
+            parsed_labs = None
+            lab_abnormalities = None
+            if request.lab_results_input:
+                if request.lab_results_input.format == "json":
+                    parsed = lab_parser_service.parse_lab_json(request.lab_results_input.data)
+                else:
+                    parsed = lab_parser_service.parse_lab_text(request.lab_results_input.data)
+            
+                parsed_labs = parsed.get("parsed_results")
+                lab_abnormalities = parsed.get("abnormalities")
+            
+                # Add lab interpretation to medical history
+                if lab_abnormalities:
+                    lab_interpretation = lab_parser_service.get_clinical_interpretation(lab_abnormalities)
+                    medical_history["lab_interpretation"] = lab_interpretation
+                    medical_history["lab_abnormalities"] = lab_abnormalities
+    
+                logger.info(
+                    "lab_results_parsed",
+                    total_tests=parsed.get("total_tests", 0),
+                    abnormal_count=parsed.get("abnormal_count", 0),
+                    correlation_id=correlation_id,
+                    )
+                    
+            # Step 5: Retrieve evidence using RAG (if enabled)
             evidence_data = None
             if settings.ENABLE_RAG:
                 try:
@@ -247,6 +273,9 @@ class DiagnosisService:
             processing_time_ms=llm_result["metadata"]["processing_time_ms"],
             llm_model_used=llm_result["metadata"]["model"],
             llm_tokens_used=llm_result["metadata"]["tokens_used"],
+            lab_results_raw=request.lab_results_input.data if request.lab_results_input else None,
+            # lab_results_parsed=parsed_labs,
+            # lab_abnormalities=lab_abnormalities,
         )
         
         db.add(diagnosis)
