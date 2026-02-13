@@ -3,8 +3,8 @@ Pydantic Schemas Module - Following SOLID Principles
 Interface Segregation: Separate schemas for different use cases
 """
 from datetime import datetime, date
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, EmailStr, Field, validator
+from typing import Optional, List, Dict, Any, Union
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from enum import Enum
 
 
@@ -60,7 +60,7 @@ class DoctorRegister(BaseModel):
     license_number: Optional[str] = None
     phone: Optional[str] = None
     
-    @validator('password')
+    @field_validator('password')
     def validate_password(cls, v):
         """Validate password strength."""
         if len(v) < 8:
@@ -159,6 +159,33 @@ class PatientResponse(PatientBase):
     class Config:
         from_attributes = True
 
+# ----------------------------------------------
+# Lab Results
+# ----------------------------------------------
+
+class LabResultInput(BaseModel):
+    """Lab result input - either text or structured."""
+    format: str = "json"  # "json" or "text"
+    data: Union[Dict[str, float], str]  # JSON dict or raw text
+
+
+class LabResultParsed(BaseModel):
+    """Parsed lab result."""
+    test: str
+    value: float
+    unit: str
+    reference_range: Dict[str, float]
+    status: str = "NORMAL"  # NORMAL, LOW, HIGH
+
+
+class LabAbnormality(BaseModel):
+    """Abnormal lab value."""
+    test: str
+    value: float
+    unit: str
+    status: str  # LOW or HIGH
+    severity: str  # MILD, MODERATE, CRITICAL
+    reference_range: str
 
 # ============================================================================
 # DIAGNOSIS SCHEMAS - Single Responsibility Principle
@@ -192,8 +219,9 @@ class DiagnosisRequest(BaseModel):
     vital_signs: Optional[VitalSigns] = None
     lab_results: Optional[Dict[str, Any]] = None
     imaging_findings: Optional[Dict[str, Any]] = None
+    lab_results_input: Optional[LabResultInput] = None
     
-    @validator('symptoms')
+    @field_validator('symptoms')
     def validate_symptoms(cls, v):
         """Validate symptoms list."""
         if not v:
