@@ -599,15 +599,14 @@ async def export_diagnosis_pdf(
         )
         
         # Return as downloadable file
-        filename = f"diagnosis_report_{patient.mrn}_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
+        filename = f"Report_{patient.full_name.replace(' ', '_')}_{patient.mrn}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
             headers={
                 "Content-Disposition": f"attachment; filename={filename}"
-            }
-        )
+            })
         
     except HTTPException:
         raise
