@@ -6,6 +6,7 @@ from fastapi import UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import EmailStr
 from typing import List
 from app.core.database import get_db
 from app.api.dependencies import get_current_doctor, check_rate_limit
@@ -615,6 +616,104 @@ async def export_diagnosis_pdf(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate PDF report"
+        )
+
+
+@diagnosis_router.post("/{diagnosis_id}/email-pdf")
+async def email_diagnosis_pdf(
+    diagnosis_id: str,
+    recipient_email: EmailStr,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Email diagnosis PDF report."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        # Get diagnosis and patient (same as export endpoint)
+        result = await db.execute(
+            select(Diagnosis).where(
+                Diagnosis.id == diagnosis_id,
+                Diagnosis.doctor_id == current_doctor.id
+            )
+        )
+        diagnosis = result.scalar_one_or_none()
+        
+        if not diagnosis:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Diagnosis not found"
+            )
+        
+        patient_result = await db.execute(
+            select(Patient).where(Patient.id == diagnosis.patient_id)
+        )
+        patient = patient_result.scalar_one()
+        
+        # Prepare data
+        diagnosis_data = {
+            'id': diagnosis.id,
+            'chief_complaint': diagnosis.chief_complaint,
+            'symptoms': diagnosis.symptoms,
+            'differential_diagnoses': diagnosis.differential_diagnoses,
+            'clinical_reasoning': diagnosis.clinical_reasoning,
+            'recommended_tests': diagnosis.recommended_tests,
+            'recommended_treatments': diagnosis.recommended_treatments,
+            'red_flags': diagnosis.red_flags,
+            'follow_up_instructions': diagnosis.follow_up_instructions,
+            'rag_enabled': diagnosis.rag_enabled,
+            'citation_count': diagnosis.citation_count,
+            'lab_results_parsed': diagnosis.lab_results_parsed,
+            'lab_abnormalities': diagnosis.lab_abnormalities,
+            'created_at': diagnosis.created_at,
+        }
+        
+        patient_data = {
+            'full_name': patient.full_name,
+            'mrn': patient.mrn,
+            'date_of_birth': str(patient.date_of_birth),
+            'gender': patient.gender,
+            'blood_group': patient.blood_group,
+            'allergies': patient.allergies,
+        }
+        
+        doctor_data = {
+            'full_name': current_doctor.full_name,
+            'license_number': current_doctor.license_number,
+            'specialization': current_doctor.specialization,
+        }
+        
+        # Generate PDF
+        pdf_bytes = pdf_service.generate_diagnosis_report(
+            diagnosis=diagnosis_data,
+            patient=patient_data,
+            doctor=doctor_data
+        )
+        
+        # Send email
+        success = pdf_service.email_diagnosis_report(
+            pdf_bytes=pdf_bytes,
+            recipient_email=recipient_email,
+            patient_name=patient.full_name,
+            doctor_name=current_doctor.full_name
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send email"
+            )
+        
+        return {"message": f"Report emailed successfully to {recipient_email}"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("email_pdf_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to email report"
         )
     
 def _calculate_confidence_level(differential_diagnoses: list) -> str:
