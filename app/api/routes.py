@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import EmailStr
-from typing import List
+from typing import List, Dict, Any
 from app.core.database import get_db
 from app.api.dependencies import get_current_doctor, check_rate_limit
 from app.schemas.schemas import (
@@ -715,6 +715,176 @@ async def email_diagnosis_pdf(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to email report"
         )
+
+@diagnosis_router.post("/compare")
+async def compare_diagnoses(
+    diagnosis_ids: List[str],
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Compare multiple diagnoses side-by-side."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        if len(diagnosis_ids) < 2 or len(diagnosis_ids) > 3:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please select 2-3 diagnoses to compare"
+            )
+        
+        # Fetch all diagnoses
+        diagnoses = []
+        for diagnosis_id in diagnosis_ids:
+            result = await db.execute(
+                select(Diagnosis).where(
+                    Diagnosis.id == diagnosis_id,
+                    Diagnosis.doctor_id == current_doctor.id
+                )
+            )
+            diagnosis = result.scalar_one_or_none()
+            if not diagnosis:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Diagnosis {diagnosis_id} not found"
+                )
+            diagnoses.append(diagnosis)
+        
+        # Sort by date
+        diagnoses.sort(key=lambda d: d.created_at)
+        
+        # Build comparison response
+        comparison = {
+            "diagnosis_count": len(diagnoses),
+            "patient_id": diagnoses[0].patient_id,
+            "date_range": {
+                "start": diagnoses[0].created_at,
+                "end": diagnoses[-1].created_at,
+            },
+            "diagnoses": [],
+        }
+        
+        for idx, diagnosis in enumerate(diagnoses):
+            comparison["diagnoses"].append({
+                "id": diagnosis.id,
+                "sequence": idx + 1,
+                "date": diagnosis.created_at,
+                "chief_complaint": diagnosis.chief_complaint,
+                "symptoms": diagnosis.symptoms,
+                "differential_diagnoses": diagnosis.differential_diagnoses,
+                "clinical_reasoning": diagnosis.clinical_reasoning,
+                "recommended_tests": diagnosis.recommended_tests,
+                "recommended_treatments": diagnosis.recommended_treatments,
+                "red_flags": diagnosis.red_flags,
+                "lab_results_parsed": diagnosis.lab_results_parsed,
+                "lab_abnormalities": diagnosis.lab_abnormalities,
+                "confidence_level": _calculate_confidence_level(diagnosis.differential_diagnoses),
+                "rag_enabled": diagnosis.rag_enabled,
+                "citation_count": diagnosis.citation_count,
+            })
+        
+        # Calculate changes between diagnoses
+        comparison["changes"] = _calculate_diagnosis_changes(diagnoses)
+        
+        logger.info(
+            "diagnoses_compared",
+            count=len(diagnoses),
+            correlation_id=correlation_id,
+        )
+        
+        return comparison
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("comparison_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to compare diagnoses"
+        )
+
+
+def _calculate_diagnosis_changes(diagnoses: List[Diagnosis]) -> Dict[str, Any]:
+    """Calculate what changed between diagnoses."""
+    changes = {
+        "symptom_changes": [],
+        "lab_changes": [],
+        "diagnosis_changes": [],
+        "overall_trend": "",
+    }
+    
+    for i in range(1, len(diagnoses)):
+        prev = diagnoses[i-1]
+        curr = diagnoses[i]
+        
+        # Symptom changes
+        prev_symptoms = {s.get('name'): s for s in prev.symptoms}
+        curr_symptoms = {s.get('name'): s for s in curr.symptoms}
+        
+        # New symptoms
+        new_symptoms = set(curr_symptoms.keys()) - set(prev_symptoms.keys())
+        if new_symptoms:
+            changes["symptom_changes"].append({
+                "from_date": prev.created_at,
+                "to_date": curr.created_at,
+                "type": "new",
+                "symptoms": list(new_symptoms),
+            })
+        
+        # Resolved symptoms
+        resolved = set(prev_symptoms.keys()) - set(curr_symptoms.keys())
+        if resolved:
+            changes["symptom_changes"].append({
+                "from_date": prev.created_at,
+                "to_date": curr.created_at,
+                "type": "resolved",
+                "symptoms": list(resolved),
+            })
+        
+        # Lab changes
+        if prev.lab_results_parsed and curr.lab_results_parsed:
+            for test_key in prev.lab_results_parsed.keys():
+                if test_key in curr.lab_results_parsed:
+                    prev_val = prev.lab_results_parsed[test_key]['value']
+                    curr_val = curr.lab_results_parsed[test_key]['value']
+                    
+                    if abs(curr_val - prev_val) / prev_val > 0.1:  # >10% change
+                        changes["lab_changes"].append({
+                            "test": prev.lab_results_parsed[test_key]['name'],
+                            "from_value": prev_val,
+                            "to_value": curr_val,
+                            "change_percent": ((curr_val - prev_val) / prev_val) * 100,
+                            "from_date": prev.created_at,
+                            "to_date": curr.created_at,
+                        })
+        
+        # Top diagnosis changes
+        prev_top = prev.differential_diagnoses[0]['diagnosis'] if prev.differential_diagnoses else None
+        curr_top = curr.differential_diagnoses[0]['diagnosis'] if curr.differential_diagnoses else None
+        
+        if prev_top != curr_top:
+            changes["diagnosis_changes"].append({
+                "from_diagnosis": prev_top,
+                "to_diagnosis": curr_top,
+                "from_date": prev.created_at,
+                "to_date": curr.created_at,
+            })
+    
+    # Overall trend
+    if len(changes["symptom_changes"]) > 0:
+        resolved_count = sum(1 for c in changes["symptom_changes"] if c["type"] == "resolved")
+        new_count = sum(1 for c in changes["symptom_changes"] if c["type"] == "new")
+        
+        if resolved_count > new_count:
+            changes["overall_trend"] = "improving"
+        elif new_count > resolved_count:
+            changes["overall_trend"] = "worsening"
+        else:
+            changes["overall_trend"] = "stable"
+    else:
+        changes["overall_trend"] = "stable"
+    
+    return changes
     
 def _calculate_confidence_level(differential_diagnoses: list) -> str:
     """Calculate overall confidence level."""
