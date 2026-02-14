@@ -3,6 +3,7 @@ Patient and Diagnosis Routes Module - UPDATED with RAG
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi import UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
@@ -17,9 +18,12 @@ from app.schemas.schemas import (
 )
 from app.services.patient_service import patient_service, PatientServiceError
 from app.services.diagnosis_service import diagnosis_service, DiagnosisServiceError
-from app.models.models import Doctor, Diagnosis
+from app.services.pdf_service import pdf_service
+from app.models.models import Doctor, Diagnosis, Patient
 from app.utils.correlation import get_correlation_id
 from app.core.logging import get_logger
+import io
+from datetime import datetime
 
 logger = get_logger(__name__)
 
@@ -520,6 +524,98 @@ async def upload_lab_report(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process lab report: {str(e)}"
+        )
+
+@diagnosis_router.get("/{diagnosis_id}/export-pdf")
+async def export_diagnosis_pdf(
+    diagnosis_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Export diagnosis as PDF report."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        # Get diagnosis
+        result = await db.execute(
+            select(Diagnosis).where(
+                Diagnosis.id == diagnosis_id,
+                Diagnosis.doctor_id == current_doctor.id
+            )
+        )
+        diagnosis = result.scalar_one_or_none()
+        
+        if not diagnosis:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Diagnosis not found"
+            )
+        
+        # Get patient
+        patient_result = await db.execute(
+            select(Patient).where(Patient.id == diagnosis.patient_id)
+        )
+        patient = patient_result.scalar_one()
+        
+        # Prepare data for PDF
+        diagnosis_data = {
+            'id': diagnosis.id,
+            'chief_complaint': diagnosis.chief_complaint,
+            'symptoms': diagnosis.symptoms,
+            'differential_diagnoses': diagnosis.differential_diagnoses,
+            'clinical_reasoning': diagnosis.clinical_reasoning,
+            'recommended_tests': diagnosis.recommended_tests,
+            'recommended_treatments': diagnosis.recommended_treatments,
+            'red_flags': diagnosis.red_flags,
+            'follow_up_instructions': diagnosis.follow_up_instructions,
+            'rag_enabled': diagnosis.rag_enabled,
+            'citation_count': diagnosis.citation_count,
+            'lab_results_parsed': diagnosis.lab_results_parsed,
+            'lab_abnormalities': diagnosis.lab_abnormalities,
+            'created_at': diagnosis.created_at,
+        }
+        
+        patient_data = {
+            'full_name': patient.full_name,
+            'mrn': patient.mrn,
+            'date_of_birth': str(patient.date_of_birth),
+            'gender': patient.gender,
+            'blood_group': patient.blood_group,
+            'allergies': patient.allergies,
+        }
+        
+        doctor_data = {
+            'full_name': current_doctor.full_name,
+            'license_number': current_doctor.license_number,
+            'specialization': current_doctor.specialization,
+        }
+        
+        # Generate PDF
+        pdf_bytes = pdf_service.generate_diagnosis_report(
+            diagnosis=diagnosis_data,
+            patient=patient_data,
+            doctor=doctor_data
+        )
+        
+        # Return as downloadable file
+        filename = f"diagnosis_report_{patient.mrn}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("pdf_export_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate PDF report"
         )
     
 def _calculate_confidence_level(differential_diagnoses: list) -> str:
