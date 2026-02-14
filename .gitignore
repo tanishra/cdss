@@ -37,3 +37,4 @@ logs/
 htmlcov/
 
 alembic.ini
+chroma_db
