@@ -373,3 +373,85 @@ class SuccessResponse(BaseModel):
     message: str
     data: Optional[Dict[str, Any]] = None
     correlation_id: Optional[str] = None
+
+# Treatment Schemas
+class TreatmentBase(BaseModel):
+    diagnosis_id: str
+    treatment_type: str
+    medication_name: Optional[str] = None
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    route: Optional[str] = None
+    duration: Optional[str] = None
+    instructions: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+
+
+class TreatmentCreate(TreatmentBase):
+    pass
+
+
+class TreatmentUpdate(BaseModel):
+    status: Optional[str] = None
+    effectiveness: Optional[str] = None
+    side_effects: Optional[List[str]] = None
+    adherence: Optional[str] = None
+    notes: Optional[str] = None
+    discontinuation_reason: Optional[str] = None
+    end_date: Optional[datetime] = None
+
+
+class TreatmentResponse(TreatmentBase):
+    id: str
+    patient_id: str
+    status: str
+    effectiveness: Optional[str]
+    side_effects: Optional[List[str]]
+    adherence: Optional[str]
+    has_interactions: bool
+    interaction_warnings: Optional[List[Dict[str, str]]]
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Prescription Schemas
+class MedicationItem(BaseModel):
+    name: str
+    dosage: str
+    frequency: str
+    route: str
+    duration: str
+    instructions: Optional[str] = None
+
+
+class PrescriptionCreate(BaseModel):
+    patient_id: str
+    diagnosis_id: Optional[str] = None
+    medications: List[MedicationItem]
+    diagnosis_summary: Optional[str] = None
+    special_instructions: Optional[str] = None
+    refills_allowed: int = 0
+    valid_days: int = 30
+
+
+class PrescriptionResponse(BaseModel):
+    id: str
+    prescription_number: str
+    patient_id: str
+    doctor_id: str
+    date_issued: datetime
+    valid_until: datetime
+    medications: List[Dict[str, str]]
+    diagnosis_summary: Optional[str]
+    special_instructions: Optional[str]
+    refills_allowed: int
+    status: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
