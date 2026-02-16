@@ -4,6 +4,9 @@ from PIL import Image
 import io
 import os
 from app.core.logging import get_logger
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = get_logger(__name__)
 
