@@ -20,7 +20,7 @@ from app.core.logging import get_logger
 
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/treatment", tags=["treatments"])
+router = APIRouter()
 
 def get_correlation_id(request: Request) -> str:
     """Get correlation ID from request state."""
