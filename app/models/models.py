@@ -186,6 +186,8 @@ class Diagnosis(Base):
     lab_results_raw = Column(JSON)  # Raw uploaded lab data
     lab_results_parsed = Column(JSON)  # Parsed and interpreted
     lab_abnormalities = Column(JSON)  # Flagged abnormal values
+
+    treatments = relationship("Treatment", back_populates="diagnosis")
     
     # Indexes
     __table_args__ = (
@@ -293,6 +295,86 @@ class DoctorFeedback(Base):
     
     def __repr__(self) -> str:
         return f"<DoctorFeedback(id={self.id}, diagnosis_id={self.diagnosis_id})>"
+
+class Treatment(Base):
+    """Treatment records for diagnoses."""
+    __tablename__ = "treatments"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    diagnosis_id = Column(String, ForeignKey("diagnoses.id"), nullable=False)
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False)
+    doctor_id = Column(String, ForeignKey("doctors.id"), nullable=False)
+    
+    # Treatment details
+    treatment_type = Column(String, nullable=False)  # medication, procedure, therapy, lifestyle
+    medication_name = Column(String)  # For medications
+    dosage = Column(String)
+    frequency = Column(String)
+    route = Column(String)  # oral, IV, topical, etc.
+    duration = Column(String)  # "7 days", "2 weeks", etc.
+    
+    # Additional details
+    instructions = Column(Text)
+    start_date = Column(DateTime, default=datetime.utcnow)
+    end_date = Column(DateTime)
+    
+    # Outcome tracking
+    status = Column(String, default="active")  # active, completed, discontinued
+    effectiveness = Column(String)  # effective, partially_effective, ineffective, unknown
+    side_effects = Column(JSON)  # List of side effects
+    adherence = Column(String)  # excellent, good, fair, poor
+    
+    # Interaction warnings
+    has_interactions = Column(Boolean, default=False)
+    interaction_warnings = Column(JSON)
+    
+    # Notes
+    notes = Column(Text)
+    discontinuation_reason = Column(String)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    diagnosis = relationship("Diagnosis", back_populates="treatments")
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
+
+
+class Prescription(Base):
+    """Prescription generation for treatments."""
+    __tablename__ = "prescriptions"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False)
+    doctor_id = Column(String, ForeignKey("doctors.id"), nullable=False)
+    diagnosis_id = Column(String, ForeignKey("diagnoses.id"))
+    
+    # Prescription details
+    prescription_number = Column(String, unique=True)
+    date_issued = Column(DateTime, default=datetime.utcnow)
+    valid_until = Column(DateTime)
+    
+    # Medications (JSON array)
+    medications = Column(JSON, nullable=False)  # List of medication objects
+    
+    # Additional info
+    diagnosis_summary = Column(Text)
+    special_instructions = Column(Text)
+    refills_allowed = Column(Integer, default=0)
+    
+    # Status
+    status = Column(String, default="active")  # active, filled, expired, cancelled
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
 
 class AuditLog(Base):
     """
