@@ -17,6 +17,7 @@ from app.core.cache import cache_manager
 from app.api.auth import router as auth_router
 from app.api.routes import patient_router, diagnosis_router
 from app.api.feedback import router as feedback_router
+from app.api import treatment
 from app.schemas.schemas import HealthCheck
 from app.utils.correlation import get_correlation_id
 
@@ -147,6 +148,11 @@ app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(patient_router, prefix=settings.API_PREFIX)
 app.include_router(diagnosis_router, prefix=settings.API_PREFIX)
 app.include_router(feedback_router, prefix=settings.API_PREFIX)
+app.include_router(
+    treatment.router,
+    prefix="/api/v1/treatments",
+    tags=["treatments"],
+)
 
 @app.get("/health", response_model=HealthCheck)
 async def health_check():
