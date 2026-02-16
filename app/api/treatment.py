@@ -17,10 +17,14 @@ from app.schemas.schemas import (
 )
 from app.services.treatment_service import treatment_service, TreatmentServiceError
 from app.core.logging import get_logger
-from app.main import get_correlation_id
+
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/treatment", tags=["treatments"])
+
+def get_correlation_id(request: Request) -> str:
+    """Get correlation ID from request state."""
+    return getattr(request.state, "correlation_id", "")
 
 
 @router.post("/", response_model=TreatmentResponse, status_code=status.HTTP_201_CREATED)
