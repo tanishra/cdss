@@ -20,7 +20,7 @@ from app.schemas.schemas import (
 from app.services.patient_service import patient_service, PatientServiceError
 from app.services.diagnosis_service import diagnosis_service, DiagnosisServiceError
 from app.services.pdf_service import pdf_service
-from app.models.models import Doctor, Diagnosis, Patient
+from app.models.models import Doctor, Diagnosis, Patient, DoctorFeedback
 from app.utils.correlation import get_correlation_id
 from app.core.logging import get_logger
 import io
@@ -285,6 +285,425 @@ async def analyze_symptoms(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate diagnosis",
         )
+
+
+@diagnosis_router.get("/search", response_model=List[DiagnosisResponseWithEvidence])
+async def search_diagnoses(
+    # Search params
+    query: Optional[str] = None,
+    patient_id: Optional[str] = None,
+    disease: Optional[str] = None,
+    symptom: Optional[str] = None,
+    
+    # Filter params
+    confidence_level: Optional[str] = None,  # High, Medium, Low
+    min_citations: Optional[int] = None,
+    has_feedback: Optional[bool] = None,
+    feedback_rating_min: Optional[int] = None,  # 1-5
+    
+    # Date range
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    
+    # Pagination
+    skip: int = 0,
+    limit: int = 50,
+    
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Advanced search and filter diagnoses."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        from sqlalchemy import or_, and_, func
+        from datetime import datetime
+        
+        # Base query
+        query_builder = select(Diagnosis).where(
+            and_(
+                Diagnosis.doctor_id == current_doctor.id,
+                Diagnosis.is_active == True
+            )
+        )
+        
+        # Text search (chief complaint, symptoms, diagnoses)
+        if query:
+            query_lower = f"%{query.lower()}%"
+            query_builder = query_builder.where(
+                or_(
+                    func.lower(Diagnosis.chief_complaint).like(query_lower),
+                    func.cast(Diagnosis.symptoms, String).like(query_lower),
+                    func.cast(Diagnosis.differential_diagnoses, String).like(query_lower),
+                )
+            )
+        
+        # Patient filter
+        if patient_id:
+            query_builder = query_builder.where(Diagnosis.patient_id == patient_id)
+        
+        # Disease filter (search in differential_diagnoses)
+        if disease:
+            disease_lower = f"%{disease.lower()}%"
+            query_builder = query_builder.where(
+                func.cast(Diagnosis.differential_diagnoses, String).like(disease_lower)
+            )
+        
+        # Symptom filter
+        if symptom:
+            symptom_lower = f"%{symptom.lower()}%"
+            query_builder = query_builder.where(
+                func.cast(Diagnosis.symptoms, String).like(symptom_lower)
+            )
+        
+        # Confidence level filter
+        if confidence_level:
+            # Calculate confidence level from differential_diagnoses
+            if confidence_level == "High":
+                query_builder = query_builder.where(
+                    func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.7%')
+                )
+            elif confidence_level == "Medium":
+                query_builder = query_builder.where(
+                    and_(
+                        func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.5%'),
+                        ~func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.7%')
+                    )
+                )
+            elif confidence_level == "Low":
+                query_builder = query_builder.where(
+                    ~func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.5%')
+                )
+        
+        # Citations filter
+        if min_citations is not None:
+            query_builder = query_builder.where(Diagnosis.citation_count >= min_citations)
+        
+        # Feedback filter
+        if has_feedback:
+            query_builder = query_builder.join(DoctorFeedback, Diagnosis.id == DoctorFeedback.diagnosis_id)
+            
+            if feedback_rating_min is not None:
+                query_builder = query_builder.where(
+                    DoctorFeedback.overall_satisfaction >= feedback_rating_min
+                )
+        
+        # Date range
+        if date_from:
+            date_from_obj = datetime.fromisoformat(date_from)
+            query_builder = query_builder.where(Diagnosis.created_at >= date_from_obj)
+        
+        if date_to:
+            date_to_obj = datetime.fromisoformat(date_to)
+            query_builder = query_builder.where(Diagnosis.created_at <= date_to_obj)
+        
+        # Order by most recent
+        query_builder = query_builder.order_by(Diagnosis.created_at.desc())
+        
+        # Pagination
+        query_builder = query_builder.offset(skip).limit(limit)
+        
+        # Execute
+        result = await db.execute(query_builder)
+        diagnoses = result.scalars().all()
+        
+        # Build response
+        response_list = []
+        for diagnosis in diagnoses:
+            differential_diagnoses_with_evidence = []
+            
+            for dx in diagnosis.differential_diagnoses:
+                citations_list = []
+                if diagnosis.evidence_used:
+                    for evidence in diagnosis.evidence_used[:3]:
+                        citations_list.append({
+                            "pubmed_id": evidence.get("pubmed_id"),
+                            "title": evidence.get("title", ""),
+                            "authors": evidence.get("authors", ""),
+                            "journal": evidence.get("journal", ""),
+                            "publication_year": evidence.get("publication_year"),
+                            "doi": evidence.get("doi"),
+                            "citation_text": evidence.get("citation_text", ""),
+                            "relevance_score": evidence.get("relevance_score", 0.9),
+                            "evidence_type": evidence.get("evidence_type", "research"),
+                            "abstract": evidence.get("abstract", ""),
+                            "url": evidence.get("url", ""),
+                        })
+                
+                dx_with_evidence = DifferentialDiagnosisWithEvidence(
+                    diagnosis=dx.get("diagnosis"),
+                    confidence=dx.get("confidence"),
+                    icd10_code=dx.get("icd10_code"),
+                    reasoning=dx.get("reasoning"),
+                    supporting_evidence=dx.get("supporting_evidence", []),
+                    contradicting_factors=dx.get("contradicting_factors"),
+                    rank=dx.get("rank"),
+                    citations=citations_list,
+                    evidence_quality=_calculate_evidence_quality(citations_list),
+                )
+                differential_diagnoses_with_evidence.append(dx_with_evidence)
+            
+            response = DiagnosisResponseWithEvidence(
+                id=diagnosis.id,
+                patient_id=diagnosis.patient_id,
+                correlation_id=diagnosis.correlation_id,
+                chief_complaint=diagnosis.chief_complaint,
+                symptoms=diagnosis.symptoms,
+                differential_diagnoses=differential_diagnoses_with_evidence,
+                clinical_reasoning=diagnosis.clinical_reasoning,
+                missing_information=diagnosis.missing_information,
+                red_flags=diagnosis.red_flags,
+                recommended_tests=diagnosis.recommended_tests,
+                recommended_treatments=diagnosis.recommended_treatments,
+                follow_up_instructions=diagnosis.follow_up_instructions,
+                evidence_used=diagnosis.evidence_used,
+                guidelines_applied=diagnosis.guidelines_applied,
+                citation_count=diagnosis.citation_count,
+                rag_enabled=diagnosis.rag_enabled,
+                processing_time_ms=diagnosis.processing_time_ms,
+                confidence_level=_calculate_confidence_level(diagnosis.differential_diagnoses),
+                created_at=diagnosis.created_at,
+                lab_results_parsed=diagnosis.lab_results_parsed or None,
+                lab_abnormalities=diagnosis.lab_abnormalities or None,
+            )
+            response_list.append(response)
+        
+        logger.info(
+            "diagnoses_searched",
+            results_count=len(response_list),
+            correlation_id=correlation_id,
+        )
+        
+        return response_list
+        
+    except Exception as e:
+        logger.error("search_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search diagnoses"
+        )
+
+
+@diagnosis_router.get("/export-csv")
+async def export_diagnoses_csv(
+    # Same filters as search
+    query: Optional[str] = None,
+    patient_id: Optional[str] = None,
+    disease: Optional[str] = None,
+    confidence_level: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Export filtered diagnoses to CSV."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        import csv
+        import io
+        from datetime import datetime
+        
+        # Reuse search logic (without pagination)
+        from sqlalchemy import or_, and_, func
+        
+        query_builder = select(Diagnosis).where(
+            and_(
+                Diagnosis.doctor_id == current_doctor.id,
+                Diagnosis.is_active == True
+            )
+        )
+        
+        # Apply same filters
+        if query:
+            query_lower = f"%{query.lower()}%"
+            query_builder = query_builder.where(
+                or_(
+                    func.lower(Diagnosis.chief_complaint).like(query_lower),
+                    func.cast(Diagnosis.symptoms, String).like(query_lower),
+                    func.cast(Diagnosis.differential_diagnoses, String).like(query_lower),
+                )
+            )
+        
+        if patient_id:
+            query_builder = query_builder.where(Diagnosis.patient_id == patient_id)
+        
+        if disease:
+            disease_lower = f"%{disease.lower()}%"
+            query_builder = query_builder.where(
+                func.cast(Diagnosis.differential_diagnoses, String).like(disease_lower)
+            )
+        
+        if date_from:
+            date_from_obj = datetime.fromisoformat(date_from)
+            query_builder = query_builder.where(Diagnosis.created_at >= date_from_obj)
+        
+        if date_to:
+            date_to_obj = datetime.fromisoformat(date_to)
+            query_builder = query_builder.where(Diagnosis.created_at <= date_to_obj)
+        
+        query_builder = query_builder.order_by(Diagnosis.created_at.desc())
+        
+        result = await db.execute(query_builder)
+        diagnoses = result.scalars().all()
+        
+        # Create CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Header
+        writer.writerow([
+            'Date',
+            'Patient ID',
+            'Chief Complaint',
+            'Top Diagnosis',
+            'Confidence',
+            'ICD-10',
+            'Confidence Level',
+            'Citations',
+            'RAG Enabled',
+            'Processing Time (ms)',
+        ])
+        
+        # Data
+        for diagnosis in diagnoses:
+            top_dx = diagnosis.differential_diagnoses[0] if diagnosis.differential_diagnoses else {}
+            
+            writer.writerow([
+                diagnosis.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                diagnosis.patient_id,
+                diagnosis.chief_complaint,
+                top_dx.get('diagnosis', 'N/A'),
+                f"{top_dx.get('confidence', 0) * 100:.1f}%",
+                top_dx.get('icd10_code', 'N/A'),
+                _calculate_confidence_level(diagnosis.differential_diagnoses),
+                diagnosis.citation_count,
+                'Yes' if diagnosis.rag_enabled else 'No',
+                f"{diagnosis.processing_time_ms:.0f}",
+            ])
+        
+        # Return CSV file
+        csv_content = output.getvalue()
+        output.close()
+        
+        filename = f"diagnoses_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return StreamingResponse(
+            io.BytesIO(csv_content.encode('utf-8')),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except Exception as e:
+        logger.error("csv_export_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to export CSV"
+        )
+
+
+@diagnosis_router.get("/analytics-by-type")
+async def get_analytics_by_diagnosis_type(
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Get analytics grouped by diagnosis type."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        from collections import defaultdict
+        
+        # Get all diagnoses
+        result = await db.execute(
+            select(Diagnosis).where(
+                and_(
+                    Diagnosis.doctor_id == current_doctor.id,
+                    Diagnosis.is_active == True
+                )
+            )
+        )
+        diagnoses = result.scalars().all()
+        
+        # Group by diagnosis type
+        diagnosis_stats = defaultdict(lambda: {
+            'count': 0,
+            'total_citations': 0,
+            'avg_confidence': 0,
+            'confidence_sum': 0,
+            'with_feedback': 0,
+            'accurate_count': 0,
+        })
+        
+        for diagnosis in diagnoses:
+            if diagnosis.differential_diagnoses and len(diagnosis.differential_diagnoses) > 0:
+                top_dx = diagnosis.differential_diagnoses[0]['diagnosis']
+                
+                diagnosis_stats[top_dx]['count'] += 1
+                diagnosis_stats[top_dx]['total_citations'] += diagnosis.citation_count or 0
+                diagnosis_stats[top_dx]['confidence_sum'] += diagnosis.differential_diagnoses[0].get('confidence', 0)
+        
+        # Get feedback data
+        feedback_result = await db.execute(
+            select(DoctorFeedback).where(DoctorFeedback.doctor_id == current_doctor.id)
+        )
+        feedbacks = feedback_result.scalars().all()
+        
+        # Map feedback to diagnoses
+        for feedback in feedbacks:
+            diagnosis_result = await db.execute(
+                select(Diagnosis).where(Diagnosis.id == feedback.diagnosis_id)
+            )
+            diagnosis = diagnosis_result.scalar_one_or_none()
+            
+            if diagnosis and diagnosis.differential_diagnoses:
+                top_dx = diagnosis.differential_diagnoses[0]['diagnosis']
+                
+                if top_dx in diagnosis_stats:
+                    diagnosis_stats[top_dx]['with_feedback'] += 1
+                    
+                    if feedback.was_in_top_5:
+                        diagnosis_stats[top_dx]['accurate_count'] += 1
+        
+        # Calculate averages
+        analytics = []
+        for diagnosis_type, stats in diagnosis_stats.items():
+            if stats['count'] > 0:
+                analytics.append({
+                    'diagnosis': diagnosis_type,
+                    'count': stats['count'],
+                    'avg_confidence': (stats['confidence_sum'] / stats['count']) * 100,
+                    'avg_citations': stats['total_citations'] / stats['count'],
+                    'accuracy_rate': (stats['accurate_count'] / stats['with_feedback'] * 100) if stats['with_feedback'] > 0 else None,
+                    'feedback_count': stats['with_feedback'],
+                })
+        
+        # Sort by count
+        analytics.sort(key=lambda x: x['count'], reverse=True)
+        
+        logger.info(
+            "diagnosis_type_analytics_generated",
+            types_count=len(analytics),
+            correlation_id=correlation_id,
+        )
+        
+        return {
+            'total_diagnosis_types': len(analytics),
+            'analytics': analytics[:20],  # Top 20
+        }
+        
+    except Exception as e:
+        logger.error("analytics_by_type_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate analytics"
+        )
+    
 
 @diagnosis_router.get("/{diagnosis_id}", response_model=DiagnosisResponseWithEvidence)
 async def get_diagnosis(
@@ -801,423 +1220,6 @@ async def compare_diagnoses(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to compare diagnoses"
-        )
-
-@diagnosis_router.get("/search", response_model=List[DiagnosisResponseWithEvidence])
-async def search_diagnoses(
-    # Search params
-    query: Optional[str] = None,
-    patient_id: Optional[str] = None,
-    disease: Optional[str] = None,
-    symptom: Optional[str] = None,
-    
-    # Filter params
-    confidence_level: Optional[str] = None,  # High, Medium, Low
-    min_citations: Optional[int] = None,
-    has_feedback: Optional[bool] = None,
-    feedback_rating_min: Optional[int] = None,  # 1-5
-    
-    # Date range
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    
-    # Pagination
-    skip: int = 0,
-    limit: int = 50,
-    
-    db: AsyncSession = Depends(get_db),
-    current_doctor: Doctor = Depends(get_current_doctor),
-    request: Request = None,
-):
-    """Advanced search and filter diagnoses."""
-    correlation_id = get_correlation_id(request)
-    
-    try:
-        from sqlalchemy import or_, and_, func
-        from datetime import datetime
-        
-        # Base query
-        query_builder = select(Diagnosis).where(
-            and_(
-                Diagnosis.doctor_id == current_doctor.id,
-                Diagnosis.is_active == True
-            )
-        )
-        
-        # Text search (chief complaint, symptoms, diagnoses)
-        if query:
-            query_lower = f"%{query.lower()}%"
-            query_builder = query_builder.where(
-                or_(
-                    func.lower(Diagnosis.chief_complaint).like(query_lower),
-                    func.cast(Diagnosis.symptoms, String).like(query_lower),
-                    func.cast(Diagnosis.differential_diagnoses, String).like(query_lower),
-                )
-            )
-        
-        # Patient filter
-        if patient_id:
-            query_builder = query_builder.where(Diagnosis.patient_id == patient_id)
-        
-        # Disease filter (search in differential_diagnoses)
-        if disease:
-            disease_lower = f"%{disease.lower()}%"
-            query_builder = query_builder.where(
-                func.cast(Diagnosis.differential_diagnoses, String).like(disease_lower)
-            )
-        
-        # Symptom filter
-        if symptom:
-            symptom_lower = f"%{symptom.lower()}%"
-            query_builder = query_builder.where(
-                func.cast(Diagnosis.symptoms, String).like(symptom_lower)
-            )
-        
-        # Confidence level filter
-        if confidence_level:
-            # Calculate confidence level from differential_diagnoses
-            if confidence_level == "High":
-                query_builder = query_builder.where(
-                    func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.7%')
-                )
-            elif confidence_level == "Medium":
-                query_builder = query_builder.where(
-                    and_(
-                        func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.5%'),
-                        ~func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.7%')
-                    )
-                )
-            elif confidence_level == "Low":
-                query_builder = query_builder.where(
-                    ~func.cast(Diagnosis.differential_diagnoses, String).like('%"confidence": 0.5%')
-                )
-        
-        # Citations filter
-        if min_citations is not None:
-            query_builder = query_builder.where(Diagnosis.citation_count >= min_citations)
-        
-        # Feedback filter
-        if has_feedback:
-            query_builder = query_builder.join(DoctorFeedback, Diagnosis.id == DoctorFeedback.diagnosis_id)
-            
-            if feedback_rating_min is not None:
-                query_builder = query_builder.where(
-                    DoctorFeedback.overall_satisfaction >= feedback_rating_min
-                )
-        
-        # Date range
-        if date_from:
-            date_from_obj = datetime.fromisoformat(date_from)
-            query_builder = query_builder.where(Diagnosis.created_at >= date_from_obj)
-        
-        if date_to:
-            date_to_obj = datetime.fromisoformat(date_to)
-            query_builder = query_builder.where(Diagnosis.created_at <= date_to_obj)
-        
-        # Order by most recent
-        query_builder = query_builder.order_by(Diagnosis.created_at.desc())
-        
-        # Pagination
-        query_builder = query_builder.offset(skip).limit(limit)
-        
-        # Execute
-        result = await db.execute(query_builder)
-        diagnoses = result.scalars().all()
-        
-        # Build response
-        response_list = []
-        for diagnosis in diagnoses:
-            differential_diagnoses_with_evidence = []
-            
-            for dx in diagnosis.differential_diagnoses:
-                citations_list = []
-                if diagnosis.evidence_used:
-                    for evidence in diagnosis.evidence_used[:3]:
-                        citations_list.append({
-                            "pubmed_id": evidence.get("pubmed_id"),
-                            "title": evidence.get("title", ""),
-                            "authors": evidence.get("authors", ""),
-                            "journal": evidence.get("journal", ""),
-                            "publication_year": evidence.get("publication_year"),
-                            "doi": evidence.get("doi"),
-                            "citation_text": evidence.get("citation_text", ""),
-                            "relevance_score": evidence.get("relevance_score", 0.9),
-                            "evidence_type": evidence.get("evidence_type", "research"),
-                            "abstract": evidence.get("abstract", ""),
-                            "url": evidence.get("url", ""),
-                        })
-                
-                dx_with_evidence = DifferentialDiagnosisWithEvidence(
-                    diagnosis=dx.get("diagnosis"),
-                    confidence=dx.get("confidence"),
-                    icd10_code=dx.get("icd10_code"),
-                    reasoning=dx.get("reasoning"),
-                    supporting_evidence=dx.get("supporting_evidence", []),
-                    contradicting_factors=dx.get("contradicting_factors"),
-                    rank=dx.get("rank"),
-                    citations=citations_list,
-                    evidence_quality=_calculate_evidence_quality(citations_list),
-                )
-                differential_diagnoses_with_evidence.append(dx_with_evidence)
-            
-            response = DiagnosisResponseWithEvidence(
-                id=diagnosis.id,
-                patient_id=diagnosis.patient_id,
-                correlation_id=diagnosis.correlation_id,
-                chief_complaint=diagnosis.chief_complaint,
-                symptoms=diagnosis.symptoms,
-                differential_diagnoses=differential_diagnoses_with_evidence,
-                clinical_reasoning=diagnosis.clinical_reasoning,
-                missing_information=diagnosis.missing_information,
-                red_flags=diagnosis.red_flags,
-                recommended_tests=diagnosis.recommended_tests,
-                recommended_treatments=diagnosis.recommended_treatments,
-                follow_up_instructions=diagnosis.follow_up_instructions,
-                evidence_used=diagnosis.evidence_used,
-                guidelines_applied=diagnosis.guidelines_applied,
-                citation_count=diagnosis.citation_count,
-                rag_enabled=diagnosis.rag_enabled,
-                processing_time_ms=diagnosis.processing_time_ms,
-                confidence_level=_calculate_confidence_level(diagnosis.differential_diagnoses),
-                created_at=diagnosis.created_at,
-                lab_results_parsed=diagnosis.lab_results_parsed or None,
-                lab_abnormalities=diagnosis.lab_abnormalities or None,
-            )
-            response_list.append(response)
-        
-        logger.info(
-            "diagnoses_searched",
-            results_count=len(response_list),
-            correlation_id=correlation_id,
-        )
-        
-        return response_list
-        
-    except Exception as e:
-        logger.error("search_error", error=str(e), correlation_id=correlation_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to search diagnoses"
-        )
-
-
-@diagnosis_router.get("/export-csv")
-async def export_diagnoses_csv(
-    # Same filters as search
-    query: Optional[str] = None,
-    patient_id: Optional[str] = None,
-    disease: Optional[str] = None,
-    confidence_level: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    
-    db: AsyncSession = Depends(get_db),
-    current_doctor: Doctor = Depends(get_current_doctor),
-    request: Request = None,
-):
-    """Export filtered diagnoses to CSV."""
-    correlation_id = get_correlation_id(request)
-    
-    try:
-        import csv
-        import io
-        from datetime import datetime
-        
-        # Reuse search logic (without pagination)
-        from sqlalchemy import or_, and_, func
-        
-        query_builder = select(Diagnosis).where(
-            and_(
-                Diagnosis.doctor_id == current_doctor.id,
-                Diagnosis.is_active == True
-            )
-        )
-        
-        # Apply same filters
-        if query:
-            query_lower = f"%{query.lower()}%"
-            query_builder = query_builder.where(
-                or_(
-                    func.lower(Diagnosis.chief_complaint).like(query_lower),
-                    func.cast(Diagnosis.symptoms, String).like(query_lower),
-                    func.cast(Diagnosis.differential_diagnoses, String).like(query_lower),
-                )
-            )
-        
-        if patient_id:
-            query_builder = query_builder.where(Diagnosis.patient_id == patient_id)
-        
-        if disease:
-            disease_lower = f"%{disease.lower()}%"
-            query_builder = query_builder.where(
-                func.cast(Diagnosis.differential_diagnoses, String).like(disease_lower)
-            )
-        
-        if date_from:
-            date_from_obj = datetime.fromisoformat(date_from)
-            query_builder = query_builder.where(Diagnosis.created_at >= date_from_obj)
-        
-        if date_to:
-            date_to_obj = datetime.fromisoformat(date_to)
-            query_builder = query_builder.where(Diagnosis.created_at <= date_to_obj)
-        
-        query_builder = query_builder.order_by(Diagnosis.created_at.desc())
-        
-        result = await db.execute(query_builder)
-        diagnoses = result.scalars().all()
-        
-        # Create CSV
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        # Header
-        writer.writerow([
-            'Date',
-            'Patient ID',
-            'Chief Complaint',
-            'Top Diagnosis',
-            'Confidence',
-            'ICD-10',
-            'Confidence Level',
-            'Citations',
-            'RAG Enabled',
-            'Processing Time (ms)',
-        ])
-        
-        # Data
-        for diagnosis in diagnoses:
-            top_dx = diagnosis.differential_diagnoses[0] if diagnosis.differential_diagnoses else {}
-            
-            writer.writerow([
-                diagnosis.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-                diagnosis.patient_id,
-                diagnosis.chief_complaint,
-                top_dx.get('diagnosis', 'N/A'),
-                f"{top_dx.get('confidence', 0) * 100:.1f}%",
-                top_dx.get('icd10_code', 'N/A'),
-                _calculate_confidence_level(diagnosis.differential_diagnoses),
-                diagnosis.citation_count,
-                'Yes' if diagnosis.rag_enabled else 'No',
-                f"{diagnosis.processing_time_ms:.0f}",
-            ])
-        
-        # Return CSV file
-        csv_content = output.getvalue()
-        output.close()
-        
-        filename = f"diagnoses_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        
-        return StreamingResponse(
-            io.BytesIO(csv_content.encode('utf-8')),
-            media_type="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}"
-            }
-        )
-        
-    except Exception as e:
-        logger.error("csv_export_error", error=str(e), correlation_id=correlation_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to export CSV"
-        )
-
-
-@diagnosis_router.get("/analytics-by-type")
-async def get_analytics_by_diagnosis_type(
-    db: AsyncSession = Depends(get_db),
-    current_doctor: Doctor = Depends(get_current_doctor),
-    request: Request = None,
-):
-    """Get analytics grouped by diagnosis type."""
-    correlation_id = get_correlation_id(request)
-    
-    try:
-        from collections import defaultdict
-        
-        # Get all diagnoses
-        result = await db.execute(
-            select(Diagnosis).where(
-                and_(
-                    Diagnosis.doctor_id == current_doctor.id,
-                    Diagnosis.is_active == True
-                )
-            )
-        )
-        diagnoses = result.scalars().all()
-        
-        # Group by diagnosis type
-        diagnosis_stats = defaultdict(lambda: {
-            'count': 0,
-            'total_citations': 0,
-            'avg_confidence': 0,
-            'confidence_sum': 0,
-            'with_feedback': 0,
-            'accurate_count': 0,
-        })
-        
-        for diagnosis in diagnoses:
-            if diagnosis.differential_diagnoses and len(diagnosis.differential_diagnoses) > 0:
-                top_dx = diagnosis.differential_diagnoses[0]['diagnosis']
-                
-                diagnosis_stats[top_dx]['count'] += 1
-                diagnosis_stats[top_dx]['total_citations'] += diagnosis.citation_count or 0
-                diagnosis_stats[top_dx]['confidence_sum'] += diagnosis.differential_diagnoses[0].get('confidence', 0)
-        
-        # Get feedback data
-        feedback_result = await db.execute(
-            select(DoctorFeedback).where(DoctorFeedback.doctor_id == current_doctor.id)
-        )
-        feedbacks = feedback_result.scalars().all()
-        
-        # Map feedback to diagnoses
-        for feedback in feedbacks:
-            diagnosis_result = await db.execute(
-                select(Diagnosis).where(Diagnosis.id == feedback.diagnosis_id)
-            )
-            diagnosis = diagnosis_result.scalar_one_or_none()
-            
-            if diagnosis and diagnosis.differential_diagnoses:
-                top_dx = diagnosis.differential_diagnoses[0]['diagnosis']
-                
-                if top_dx in diagnosis_stats:
-                    diagnosis_stats[top_dx]['with_feedback'] += 1
-                    
-                    if feedback.was_in_top_5:
-                        diagnosis_stats[top_dx]['accurate_count'] += 1
-        
-        # Calculate averages
-        analytics = []
-        for diagnosis_type, stats in diagnosis_stats.items():
-            if stats['count'] > 0:
-                analytics.append({
-                    'diagnosis': diagnosis_type,
-                    'count': stats['count'],
-                    'avg_confidence': (stats['confidence_sum'] / stats['count']) * 100,
-                    'avg_citations': stats['total_citations'] / stats['count'],
-                    'accuracy_rate': (stats['accurate_count'] / stats['with_feedback'] * 100) if stats['with_feedback'] > 0 else None,
-                    'feedback_count': stats['with_feedback'],
-                })
-        
-        # Sort by count
-        analytics.sort(key=lambda x: x['count'], reverse=True)
-        
-        logger.info(
-            "diagnosis_type_analytics_generated",
-            types_count=len(analytics),
-            correlation_id=correlation_id,
-        )
-        
-        return {
-            'total_diagnosis_types': len(analytics),
-            'analytics': analytics[:20],  # Top 20
-        }
-        
-    except Exception as e:
-        logger.error("analytics_by_type_error", error=str(e), correlation_id=correlation_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate analytics"
         )
     
 def _calculate_diagnosis_changes(diagnoses: List[Diagnosis]) -> Dict[str, Any]:
