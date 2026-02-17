@@ -623,14 +623,21 @@ async def get_analytics_by_diagnosis_type(
         from collections import defaultdict
         
         # Get all diagnoses
+        # result = await db.execute(
+        #     select(Diagnosis).where(
+        #         and_(
+        #             Diagnosis.doctor_id == current_doctor.id,
+        #             Diagnosis.is_active == True
+        #         )
+        #     )
+        # )
+        
         result = await db.execute(
             select(Diagnosis).where(
-                and_(
-                    Diagnosis.doctor_id == current_doctor.id,
-                    Diagnosis.is_active == True
-                )
+            Diagnosis.doctor_id == current_doctor.id
             )
         )
+
         diagnoses = result.scalars().all()
         
         # Group by diagnosis type
@@ -701,10 +708,11 @@ async def get_analytics_by_diagnosis_type(
         }
         
     except Exception as e:
-        logger.error("analytics_by_type_error", error=str(e), correlation_id=correlation_id)
+        import traceback
+        logger.error("analytics_by_type_error", error=str(e), traceback=traceback.format_exc(), correlation_id=correlation_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate analytics"
+            detail=f"Failed to generate analytics: {str(e)}"
         )
     
 
