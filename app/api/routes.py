@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi import UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, String
+from sqlalchemy import select, String, and_, or_, func
 from pydantic import EmailStr
 from typing import List, Dict, Any, Optional
 from app.core.database import get_db
@@ -321,12 +321,15 @@ async def search_diagnoses(
         from datetime import datetime
         
         # Base query
+        # query_builder = select(Diagnosis).where(
+        #     and_(
+        #         Diagnosis.doctor_id == current_doctor.id,
+        #         Diagnosis.is_active == True
+        #     )
+        # )
         query_builder = select(Diagnosis).where(
-            and_(
-                Diagnosis.doctor_id == current_doctor.id,
-                Diagnosis.is_active == True
+            Diagnosis.doctor_id == current_doctor.id
             )
-        )
         
         # Text search (chief complaint, symptoms, diagnoses)
         if query:
