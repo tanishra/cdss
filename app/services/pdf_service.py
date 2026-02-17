@@ -17,6 +17,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = get_logger(__name__)
 
