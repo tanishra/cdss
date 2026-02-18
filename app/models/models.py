@@ -48,6 +48,19 @@ class Doctor(Base):
     patients = relationship("Patient", back_populates="doctor", cascade="all, delete-orphan")
     diagnoses = relationship("Diagnosis", back_populates="doctor", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="doctor", cascade="all, delete-orphan")
+
+    phone = Column(String, nullable=True)
+    bio = Column(Text, nullable=True)
+    hospital = Column(String, nullable=True)
+    department = Column(String, nullable=True)
+    years_experience = Column(Integer, nullable=True)
+    profile_picture = Column(String, nullable=True)
+    
+    # Settings
+    email_notifications = Column(Boolean, default=True)
+    appointment_reminders = Column(Boolean, default=True)
+    two_factor_enabled = Column(Boolean, default=False)
+    default_appointment_duration = Column(Integer, default=30)
     
     def __repr__(self) -> str:
         return f"<Doctor(id={self.id}, email={self.email})>"
@@ -422,3 +435,88 @@ class AuditLog(Base):
     
     def __repr__(self) -> str:
         return f"<AuditLog(id={self.id}, event_type={self.event_type})>"
+    
+class ClinicalNote(Base):
+    """Clinical notes per patient visit."""
+    __tablename__ = "clinical_notes"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False)
+    doctor_id = Column(String, ForeignKey("doctors.id"), nullable=False)
+    diagnosis_id = Column(String, ForeignKey("diagnoses.id"), nullable=True)
+    
+    # Note content
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    note_type = Column(String, default="general")  # general, follow_up, procedure, referral
+    is_private = Column(Boolean, default=False)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
+
+
+class VitalRecord(Base):
+    """Vitals tracking over time."""
+    __tablename__ = "vital_records"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False)
+    doctor_id = Column(String, ForeignKey("doctors.id"), nullable=False)
+    diagnosis_id = Column(String, ForeignKey("diagnoses.id"), nullable=True)
+    
+    # Vital signs
+    temperature = Column(Float, nullable=True)
+    blood_pressure_systolic = Column(Integer, nullable=True)
+    blood_pressure_diastolic = Column(Integer, nullable=True)
+    heart_rate = Column(Integer, nullable=True)
+    respiratory_rate = Column(Integer, nullable=True)
+    oxygen_saturation = Column(Float, nullable=True)
+    weight = Column(Float, nullable=True)
+    height = Column(Float, nullable=True)
+    bmi = Column(Float, nullable=True)
+    blood_glucose = Column(Float, nullable=True)
+    
+    # Notes
+    notes = Column(Text, nullable=True)
+    recorded_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
+
+
+class Appointment(Base):
+    """Appointment scheduler."""
+    __tablename__ = "appointments"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False)
+    doctor_id = Column(String, ForeignKey("doctors.id"), nullable=False)
+    diagnosis_id = Column(String, ForeignKey("diagnoses.id"), nullable=True)
+    
+    # Appointment details
+    title = Column(String, nullable=False)
+    appointment_type = Column(String, default="follow_up")  # follow_up, consultation, procedure, checkup
+    scheduled_at = Column(DateTime, nullable=False)
+    duration_minutes = Column(Integer, default=30)
+    
+    # Status
+    status = Column(String, default="scheduled")  # scheduled, completed, cancelled, no_show
+    
+    # Notes
+    notes = Column(Text, nullable=True)
+    reminder_sent = Column(Boolean, default=False)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
