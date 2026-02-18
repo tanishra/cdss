@@ -455,3 +455,149 @@ class PrescriptionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+    
+# Clinical Notes
+class ClinicalNoteCreate(BaseModel):
+    patient_id: str
+    diagnosis_id: Optional[str] = None
+    title: str
+    content: str
+    note_type: str = "general"
+    is_private: bool = False
+
+
+class ClinicalNoteUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    note_type: Optional[str] = None
+    is_private: Optional[bool] = None
+
+
+class ClinicalNoteResponse(BaseModel):
+    id: str
+    patient_id: str
+    doctor_id: str
+    diagnosis_id: Optional[str]
+    title: str
+    content: str
+    note_type: str
+    is_private: bool
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Vital Records
+class VitalRecordCreate(BaseModel):
+    patient_id: str
+    diagnosis_id: Optional[str] = None
+    temperature: Optional[float] = None
+    blood_pressure_systolic: Optional[int] = None
+    blood_pressure_diastolic: Optional[int] = None
+    heart_rate: Optional[int] = None
+    respiratory_rate: Optional[int] = None
+    oxygen_saturation: Optional[float] = None
+    weight: Optional[float] = None
+    height: Optional[float] = None
+    blood_glucose: Optional[float] = None
+    notes: Optional[str] = None
+    recorded_at: Optional[datetime] = None
+
+
+class VitalRecordResponse(BaseModel):
+    id: str
+    patient_id: str
+    doctor_id: str
+    diagnosis_id: Optional[str]
+    temperature: Optional[float]
+    blood_pressure_systolic: Optional[int]
+    blood_pressure_diastolic: Optional[int]
+    heart_rate: Optional[int]
+    respiratory_rate: Optional[int]
+    oxygen_saturation: Optional[float]
+    weight: Optional[float]
+    height: Optional[float]
+    bmi: Optional[float]
+    blood_glucose: Optional[float]
+    notes: Optional[str]
+    recorded_at: datetime
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Appointments
+class AppointmentCreate(BaseModel):
+    patient_id: str
+    diagnosis_id: Optional[str] = None
+    title: str
+    appointment_type: str = "follow_up"
+    scheduled_at: datetime
+    duration_minutes: int = 30
+    notes: Optional[str] = None
+
+
+class AppointmentUpdate(BaseModel):
+    title: Optional[str] = None
+    appointment_type: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class AppointmentResponse(BaseModel):
+    id: str
+    patient_id: str
+    doctor_id: str
+    diagnosis_id: Optional[str]
+    title: str
+    appointment_type: str
+    scheduled_at: datetime
+    duration_minutes: int
+    status: str
+    notes: Optional[str]
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Doctor Profile
+class DoctorProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    hospital: Optional[str] = None
+    department: Optional[str] = None
+    years_experience: Optional[int] = None
+    specialization: Optional[str] = None
+
+
+class DoctorSettingsUpdate(BaseModel):
+    email_notifications: Optional[bool] = None
+    appointment_reminders: Optional[bool] = None
+    default_appointment_duration: Optional[int] = None
+
+
+class DoctorProfileResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    specialization: Optional[str]
+    license_number: Optional[str]
+    phone: Optional[str]
+    bio: Optional[str]
+    hospital: Optional[str]
+    department: Optional[str]
+    years_experience: Optional[int]
+    email_notifications: bool
+    appointment_reminders: bool
+    default_appointment_duration: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
