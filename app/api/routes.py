@@ -211,6 +211,212 @@ async def delete_patient(
         logger.error("patient_delete_error", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to delete patient")
 
+@patient_router.get("/{patient_id}/export-pdf")
+async def export_patient_pdf(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Export complete patient profile + history to PDF."""
+    try:
+        from app.services.pdf_service import pdf_service
+        from app.models.models import Diagnosis, Treatment, ClinicalNote, VitalRecord, Appointment
+        
+        # Get patient
+        patient_result = await db.execute(
+            select(Patient).where(Patient.id == patient_id)
+        )
+        patient = patient_result.scalar_one_or_none()
+        
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        
+        # Get all related data
+        diagnoses_result = await db.execute(
+            select(Diagnosis).where(Diagnosis.patient_id == patient_id).order_by(Diagnosis.created_at.desc())
+        )
+        diagnoses = diagnoses_result.scalars().all()
+        
+        treatments_result = await db.execute(
+            select(Treatment).where(Treatment.patient_id == patient_id).order_by(Treatment.created_at.desc())
+        )
+        treatments = treatments_result.scalars().all()
+        
+        notes_result = await db.execute(
+            select(ClinicalNote).where(ClinicalNote.patient_id == patient_id).order_by(ClinicalNote.created_at.desc())
+        )
+        notes = notes_result.scalars().all()
+        
+        vitals_result = await db.execute(
+            select(VitalRecord).where(VitalRecord.patient_id == patient_id).order_by(VitalRecord.recorded_at.desc()).limit(10)
+        )
+        vitals = vitals_result.scalars().all()
+        
+        appointments_result = await db.execute(
+            select(Appointment).where(Appointment.patient_id == patient_id).order_by(Appointment.scheduled_at.desc())
+        )
+        appointments = appointments_result.scalars().all()
+        
+        # Generate PDF
+        pdf_bytes = pdf_service.generate_patient_report(
+            patient=patient,
+            diagnoses=diagnoses,
+            treatments=treatments,
+            notes=notes,
+            vitals=vitals,
+            appointments=appointments,
+            doctor=current_doctor,
+        )
+        
+        filename = f"Patient_Report_{patient.full_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("patient_pdf_export_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
+
+
+@patient_router.get("/{patient_id}/stats")
+async def get_patient_stats(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Get patient quick stats."""
+    try:
+        from app.models.models import Diagnosis, Treatment, Appointment
+        
+        # Total diagnoses
+        diagnoses_result = await db.execute(
+            select(func.count(Diagnosis.id)).where(Diagnosis.patient_id == patient_id)
+        )
+        total_diagnoses = diagnoses_result.scalar()
+        
+        # Last diagnosis
+        last_diagnosis_result = await db.execute(
+            select(Diagnosis).where(Diagnosis.patient_id == patient_id)
+            .order_by(Diagnosis.created_at.desc()).limit(1)
+        )
+        last_diagnosis = last_diagnosis_result.scalar_one_or_none()
+        
+        # Active treatments
+        active_treatments_result = await db.execute(
+            select(func.count(Treatment.id)).where(
+                and_(
+                    Treatment.patient_id == patient_id,
+                    Treatment.status == "active"
+                )
+            )
+        )
+        active_treatments = active_treatments_result.scalar()
+        
+        # Upcoming appointments
+        upcoming_appointments_result = await db.execute(
+            select(func.count(Appointment.id)).where(
+                and_(
+                    Appointment.patient_id == patient_id,
+                    Appointment.status == "scheduled",
+                    Appointment.scheduled_at >= datetime.utcnow()
+                )
+            )
+        )
+        upcoming_appointments = upcoming_appointments_result.scalar()
+        
+        return {
+            "total_diagnoses": total_diagnoses,
+            "last_diagnosis_date": last_diagnosis.created_at if last_diagnosis else None,
+            "last_diagnosis_condition": last_diagnosis.differential_diagnoses[0]['diagnosis'] if last_diagnosis and last_diagnosis.differential_diagnoses else None,
+            "active_treatments": active_treatments,
+            "upcoming_appointments": upcoming_appointments,
+        }
+        
+    except Exception as e:
+        logger.error("patient_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get stats")
+
+
+@patient_router.post("/bulk-import")
+async def bulk_import_patients(
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Bulk import patients from CSV."""
+    try:
+        import csv
+        import io
+        
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="File must be CSV")
+        
+        contents = await file.read()
+        csv_file = io.StringIO(contents.decode('utf-8'))
+        reader = csv.DictReader(csv_file)
+        
+        imported = 0
+        errors = []
+        
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                # Validate required fields
+                if not row.get('full_name') or not row.get('mrn') or not row.get('date_of_birth') or not row.get('gender'):
+                    errors.append(f"Row {row_num}: Missing required fields")
+                    continue
+                
+                # Parse allergies and chronic conditions
+                allergies = [a.strip() for a in row.get('allergies', '').split(';') if a.strip()]
+                chronic_conditions = [c.strip() for c in row.get('chronic_conditions', '').split(';') if c.strip()]
+                
+                patient = Patient(
+                    full_name=row['full_name'],
+                    mrn=row['mrn'],
+                    date_of_birth=row['date_of_birth'],
+                    gender=row['gender'],
+                    phone=row.get('phone'),
+                    email=row.get('email'),
+                    address=row.get('address'),
+                    blood_group=row.get('blood_group'),
+                    allergies=allergies if allergies else None,
+                    chronic_conditions=chronic_conditions if chronic_conditions else None,
+                    emergency_contact_name=row.get('emergency_contact_name'),
+                    emergency_contact_phone=row.get('emergency_contact_phone'),
+                    insurance_provider=row.get('insurance_provider'),
+                    insurance_number=row.get('insurance_number'),
+                )
+                
+                db.add(patient)
+                imported += 1
+                
+            except Exception as e:
+                errors.append(f"Row {row_num}: {str(e)}")
+        
+        await db.commit()
+        
+        logger.info("bulk_import_completed", imported=imported, errors=len(errors))
+        
+        return {
+            "imported": imported,
+            "errors": errors,
+            "message": f"Successfully imported {imported} patients"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error("bulk_import_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to import patients")
+
 # ============================================================================
 # DIAGNOSIS ROUTES - UPDATED WITH RAG
 # ============================================================================
