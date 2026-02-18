@@ -142,6 +142,75 @@ async def list_patients(
             detail="Failed to list patients",
         )
 
+@patient_router.patch("/{patient_id}", response_model=PatientResponse)
+async def update_patient(
+    patient_id: str,
+    patient_update: PatientCreate,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Update patient."""
+    try:
+        result = await db.execute(
+            select(Patient).where(Patient.id == patient_id)
+        )
+        patient = result.scalar_one_or_none()
+        
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        
+        # Update fields
+        update_data = patient_update.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            if hasattr(patient, key):
+                setattr(patient, key, value)
+        
+        await db.commit()
+        await db.refresh(patient)
+        
+        logger.info("patient_updated", patient_id=patient_id)
+        return patient
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error("patient_update_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update patient")
+
+
+@patient_router.delete("/{patient_id}")
+async def delete_patient(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: Doctor = Depends(get_current_doctor),
+    request: Request = None,
+):
+    """Delete patient (soft delete)."""
+    try:
+        result = await db.execute(
+            select(Patient).where(Patient.id == patient_id)
+        )
+        patient = result.scalar_one_or_none()
+        
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        
+        # Soft delete
+        await db.delete(patient)
+        await db.commit()
+        
+        logger.info("patient_deleted", patient_id=patient_id)
+        return {"message": "Patient deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error("patient_delete_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete patient")
+
 # ============================================================================
 # DIAGNOSIS ROUTES - UPDATED WITH RAG
 # ============================================================================
