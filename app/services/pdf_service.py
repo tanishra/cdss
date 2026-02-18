@@ -10,7 +10,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 from datetime import datetime
 import io
-from typing import Dict, Any
+from typing import Dict, Any, List
 from app.core.logging import get_logger
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -396,5 +396,190 @@ class PDFService:
             logger.error("email_error", error=str(e))
             return False
 
+    def generate_patient_report(
+    self,
+    patient: Any,
+    diagnoses: List[Any],
+    treatments: List[Any],
+    notes: List[Any],
+    vitals: List[Any],
+    appointments: List[Any],
+    doctor: Any,
+) -> bytes:
+        """Generate comprehensive patient report."""
+        try:
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=0.75*inch, leftMargin=0.75*inch,
+                                    topMargin=1*inch, bottomMargin=1*inch)
+            
+            elements = []
+            styles = getSampleStyleSheet()
+            
+            title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24,
+                                        textColor=colors.HexColor('#1e40af'), spaceAfter=30, alignment=TA_CENTER)
+            heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14,
+                                        textColor=colors.HexColor('#1e40af'), spaceAfter=12, spaceBefore=12)
+            
+            # Title
+            elements.append(Paragraph("PATIENT MEDICAL REPORT", title_style))
+            elements.append(Spacer(1, 0.3*inch))
+            
+            # Patient Info
+            elements.append(Paragraph("PATIENT INFORMATION", heading_style))
+            patient_data = [
+                ["Name:", patient.full_name, "MRN:", patient.mrn],
+                ["DOB:", patient.date_of_birth, "Gender:", patient.gender],
+                ["Phone:", patient.phone or "N/A", "Email:", patient.email or "N/A"],
+                ["Blood Group:", patient.blood_group or "N/A", "Address:", patient.address or "N/A"],
+            ]
+        
+            patient_table = Table(patient_data, colWidths=[1.2*inch, 2.3*inch, 1*inch, 2*inch])
+            patient_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3f4f6')),
+                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f3f4f6')),
+                ('PADDING', (0, 0), (-1, -1), 8),
+            ]))
+            elements.append(patient_table)
+            elements.append(Spacer(1, 0.3*inch))
+        
+            # Allergies & Conditions
+            if patient.allergies or patient.chronic_conditions:
+                alert_data = []
+                if patient.allergies:
+                    alert_data.append(["Allergies:", ", ".join(patient.allergies)])
+                if patient.chronic_conditions:
+                    alert_data.append(["Chronic Conditions:", ", ".join(patient.chronic_conditions)])
+                
+                alert_table = Table(alert_data, colWidths=[1.5*inch, 5*inch])
+                alert_table.setStyle(TableStyle([
+                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fef2f2')),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#991b1b')),
+                    ('PADDING', (0, 0), (-1, -1), 8),
+                ]))
+                elements.append(alert_table)
+                elements.append(Spacer(1, 0.3*inch))
+        
+            # Diagnosis History
+            if diagnoses:
+                elements.append(PageBreak())
+                elements.append(Paragraph("DIAGNOSIS HISTORY", heading_style))
+                
+                for idx, diagnosis in enumerate(diagnoses[:5], 1):
+                    elements.append(Paragraph(f"<b>{idx}. {format(diagnosis.created_at, 'PP')}</b>", styles['Normal']))
+                    elements.append(Paragraph(f"Chief Complaint: {diagnosis.chief_complaint}", styles['Normal']))
+                    
+                    if diagnosis.differential_diagnoses:
+                        top_dx = diagnosis.differential_diagnoses[0]
+                        elements.append(Paragraph(
+                            f"Diagnosis: {top_dx['diagnosis']} ({int(top_dx['confidence'] * 100)}% confidence)",
+                            styles['Normal']
+                        ))
+                    
+                    elements.append(Spacer(1, 0.2*inch))
+        
+            # Active Treatments
+            active_treatments = [t for t in treatments if t.status == "active"]
+            if active_treatments:
+                elements.append(Paragraph("ACTIVE TREATMENTS", heading_style))
+                
+                for treatment in active_treatments:
+                    elements.append(Paragraph(
+                        f"• {treatment.medication_name} - {treatment.dosage}, {treatment.frequency}",
+                        styles['Normal']
+                    ))
+                    if treatment.duration:
+                        elements.append(Paragraph(f"  Duration: {treatment.duration}", styles['Normal']))
+                
+                elements.append(Spacer(1, 0.3*inch))
+        
+            # Recent Vitals
+            if vitals:
+                elements.append(Paragraph("RECENT VITAL SIGNS", heading_style))
+                
+                vitals_data = [["Date", "Temp", "BP", "HR", "O₂%", "Glucose", "Weight"]]
+                
+                for vital in vitals[:5]:
+                    vitals_data.append([
+                        format(vital.recorded_at, 'PP'),
+                        f"{vital.temperature}°C" if vital.temperature else "-",
+                        f"{vital.blood_pressure_systolic}/{vital.blood_pressure_diastolic}" if vital.blood_pressure_systolic else "-",
+                        f"{vital.heart_rate}" if vital.heart_rate else "-",
+                        f"{vital.oxygen_saturation}%" if vital.oxygen_saturation else "-",
+                        f"{vital.blood_glucose}" if vital.blood_glucose else "-",
+                        f"{vital.weight}kg" if vital.weight else "-",
+                    ])
+                
+                vitals_table = Table(vitals_data, colWidths=[1*inch, 0.8*inch, 0.9*inch, 0.7*inch, 0.7*inch, 0.9*inch, 0.9*inch])
+                vitals_table.setStyle(TableStyle([
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')]),
+                    ('PADDING', (0, 0), (-1, -1), 6),
+                ]))
+                elements.append(vitals_table)
+                elements.append(Spacer(1, 0.3*inch))
+        
+            # Upcoming Appointments
+            upcoming = [a for a in appointments if a.status == "scheduled" and a.scheduled_at >= datetime.utcnow()]
+            if upcoming:
+                elements.append(Paragraph("UPCOMING APPOINTMENTS", heading_style))
+                
+                for apt in upcoming[:3]:
+                    elements.append(Paragraph(
+                        f"• {format(apt.scheduled_at, 'PPp')} - {apt.title}",
+                        styles['Normal']
+                    ))
+                
+                elements.append(Spacer(1, 0.3*inch))
+            
+            # Clinical Notes Summary
+            if notes:
+                elements.append(PageBreak())
+                elements.append(Paragraph("CLINICAL NOTES SUMMARY", heading_style))
+                
+                for note in notes[:5]:
+                    elements.append(Paragraph(f"<b>{format(note.created_at, 'PP')} - {note.title}</b>", styles['Normal']))
+                    elements.append(Paragraph(note.content[:200] + "..." if len(note.content) > 200 else note.content, styles['Normal']))
+                    elements.append(Spacer(1, 0.15*inch))
+        
+            # Signature
+            elements.append(Spacer(1, 0.5*inch))
+            sig_data = [
+                ["", ""],
+                ["_" * 40, "_" * 40],
+                [f"Prepared by: {doctor.full_name}", f"Date: {format(datetime.now(), 'PP')}"],
+                [f"License: {doctor.license_number}", "Signature"],
+            ]
+            sig_table = Table(sig_data, colWidths=[3.25*inch, 3.25*inch])
+            sig_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ]))
+            elements.append(sig_table)
+            
+            # Build PDF
+            doc.build(elements, onFirstPage=self._add_footer, onLaterPages=self._add_footer)
+            
+            pdf_bytes = buffer.getvalue()
+            buffer.close()
+            
+            logger.info("patient_report_generated", size_bytes=len(pdf_bytes))
+            return pdf_bytes
+        
+        except Exception as e:
+            logger.error("patient_report_generation_error", error=str(e))
+            raise
 # Global instance
 pdf_service = PDFService()
