@@ -340,13 +340,17 @@ async def create_appointment(
 ):
     """Create appointment."""
     try:
+        scheduled_at = appointment.scheduled_at
+        if scheduled_at.tzinfo is not None:
+            scheduled_at = scheduled_at.replace(tzinfo=None)
+
         new_appointment = Appointment(
             patient_id=appointment.patient_id,
             doctor_id=current_doctor.id,
             diagnosis_id=appointment.diagnosis_id,
             title=appointment.title,
             appointment_type=appointment.appointment_type,
-            scheduled_at=appointment.scheduled_at,
+            scheduled_at=scheduled_at,
             duration_minutes=appointment.duration_minutes,
             notes=appointment.notes,
         )
