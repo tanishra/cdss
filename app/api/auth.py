@@ -14,9 +14,10 @@ from app.core.security import (
     verify_password,
     create_access_token,
     validate_password_strength,
+    get_password_hash
 )
 from app.core.config import settings
-from app.schemas.schemas import DoctorRegister, DoctorLogin, Token, DoctorResponse
+from app.schemas.schemas import DoctorRegister, DoctorLogin, Token, DoctorResponse, DoctorCreate
 from app.models.models import Doctor
 from app.utils.correlation import get_correlation_id
 from app.api.dependencies import get_current_doctor
