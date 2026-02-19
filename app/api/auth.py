@@ -242,3 +242,83 @@ async def get_current_doctor_info(
     Single Responsibility: Return current user info
     """
     return doctor
+
+@router.post("/register", response_model=DoctorResponse)
+async def register(
+    doctor: DoctorCreate,
+    organization_name: str = None,  # NEW: Optional org name
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
+):
+    """Register new doctor (and optionally create organization)."""
+    correlation_id = get_correlation_id(request)
+    
+    try:
+        from app.models.models import Organization, Role
+        from app.core.seed import seed_roles
+        
+        # Seed roles if not exists
+        await seed_roles(db)
+        
+        # Check if email exists
+        result = await db.execute(select(Doctor).where(Doctor.email == doctor.email))
+        if result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+        
+        # Create organization if provided
+        organization_id = None
+        if organization_name:
+            organization = Organization(
+                name=organization_name,
+                org_type="clinic",
+                is_active=True,
+            )
+            db.add(organization)
+            await db.flush()
+            organization_id = organization.id
+        
+        # Get admin role
+        role_result = await db.execute(select(Role).where(Role.name == "admin"))
+        admin_role = role_result.scalar_one()
+        
+        # Create doctor
+        hashed_password = get_password_hash(doctor.password)
+        
+        new_doctor = Doctor(
+            email=doctor.email,
+            hashed_password=hashed_password,
+            full_name=doctor.full_name,
+            specialization=doctor.specialization,
+            license_number=doctor.license_number,
+            organization_id=organization_id,
+            role_id=admin_role.id if organization_name else None,  # First user is admin
+            is_admin=True if organization_name else False,
+            is_active=True,
+        )
+        
+        db.add(new_doctor)
+        await db.commit()
+        await db.refresh(new_doctor)
+        
+        logger.info(
+            "doctor_registered",
+            doctor_id=new_doctor.id,
+            email=new_doctor.email,
+            has_organization=organization_id is not None,
+            correlation_id=correlation_id,
+        )
+        
+        return new_doctor
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error("registration_error", error=str(e), correlation_id=correlation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed"
+        )
