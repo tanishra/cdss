@@ -608,3 +608,46 @@ class DoctorCreate(BaseModel):
     full_name: str
     specialization: Optional[str] = None
     license_number: Optional[str] = None
+
+# Patient User Schemas
+class PatientUserCreate(BaseModel):
+    email: str
+    password: str
+    patient_id: str
+
+
+class PatientUserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class PatientUserResponse(BaseModel):
+    id: str
+    email: str
+    patient_id: str
+    is_active: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Patient Message Schemas
+class PatientMessageCreate(BaseModel):
+    doctor_id: str
+    subject: str
+    message: str
+
+
+class PatientMessageResponse(BaseModel):
+    id: str
+    patient_id: str
+    doctor_id: str
+    subject: str
+    message: str
+    sender_type: str
+    is_read: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
