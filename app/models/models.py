@@ -598,3 +598,55 @@ class Role(Base):
     permissions = Column(JSON)  # {"can_edit_patients": true, "can_delete_diagnoses": false}
     
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PatientUser(Base):
+    """Patient login accounts - separate from Patient records."""
+    __tablename__ = "patient_users"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False, unique=True)
+    
+    # Authentication
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    
+    # Status
+    is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login = Column(DateTime)
+    
+    # Relationship
+    patient = relationship("Patient", backref="user_account")
+    
+    def __repr__(self) -> str:
+        return f"<PatientUser(id={self.id}, email={self.email})>"
+
+
+class PatientMessage(Base):
+    """Messages between patients and doctors."""
+    __tablename__ = "patient_messages"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False)
+    doctor_id = Column(String, ForeignKey("doctors.id"), nullable=False)
+    
+    # Message
+    subject = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    sender_type = Column(String, nullable=False)  # patient, doctor
+    
+    # Status
+    is_read = Column(Boolean, default=False)
+    parent_message_id = Column(String, ForeignKey("patient_messages.id"), nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
