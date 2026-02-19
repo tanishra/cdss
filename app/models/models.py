@@ -51,12 +51,13 @@ class Doctor(Base):
     is_active = Column(Boolean, default=True)
     
     # Relationships - Open/Closed Principle: Easy to extend without modification
-    patients = relationship("Patient", back_populates="doctor", cascade="all, delete-orphan")
     diagnoses = relationship("Diagnosis", back_populates="doctor", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="doctor", cascade="all, delete-orphan")
     organization = relationship("Organization", back_populates="doctors")
-    department = relationship("Department", foreign_keys=[department_id], back_populates="doctors")
+    department_rel = relationship("Department", foreign_keys=[department_id], back_populates="doctors")
     role = relationship("Role")
+    patients = relationship("Patient", foreign_keys="Patient.doctor_id",back_populates="doctor", cascade="all, delete-orphan")
+    assigned_patients = relationship("Patient", foreign_keys="Patient.assigned_doctor_id",back_populates="assigned_doctor", cascade="all, delete-orphan")
 
     phone = Column(String, nullable=True)
     bio = Column(Text, nullable=True)
@@ -123,10 +124,10 @@ class Patient(Base):
     assigned_doctor_id = Column(String, ForeignKey("doctors.id"), nullable=True)
     
     # Relationships
-    doctor = relationship("Doctor", back_populates="patients")
+    doctor = relationship("Doctor", foreign_keys=[doctor_id],back_populates="patients")
     diagnoses = relationship("Diagnosis", back_populates="patient", cascade="all, delete-orphan")
     organization = relationship("Organization", back_populates="patients")
-    assigned_doctor = relationship("Doctor", foreign_keys=[assigned_doctor_id])
+    assigned_doctor = relationship("Doctor", foreign_keys=[assigned_doctor_id], back_populates="assigned_patients")
     
     # Indexes - Performance optimization
     __table_args__ = (
@@ -584,7 +585,7 @@ class Department(Base):
     
     # Relationships
     organization = relationship("Organization", back_populates="departments")
-    doctors = relationship("Doctor", foreign_keys="Doctor.department_id", back_populates="department")
+    doctors = relationship("Doctor", foreign_keys="Doctor.department_id", back_populates="department_rel")
 
 
 class Role(Base):
