@@ -601,3 +601,10 @@ class DoctorProfileResponse(BaseModel):
     
     class Config:
         from_attributes = True
+    
+class DoctorCreate(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    specialization: Optional[str] = None
+    license_number: Optional[str] = None
