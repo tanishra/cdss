@@ -43,11 +43,20 @@ class Doctor(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login = Column(DateTime(timezone=True))
+
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
+    department_id = Column(String, ForeignKey("departments.id"), nullable=True)
+    role_id = Column(String, ForeignKey("roles.id"), nullable=True)
+    is_admin = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
     
     # Relationships - Open/Closed Principle: Easy to extend without modification
     patients = relationship("Patient", back_populates="doctor", cascade="all, delete-orphan")
     diagnoses = relationship("Diagnosis", back_populates="doctor", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="doctor", cascade="all, delete-orphan")
+    organization = relationship("Organization", back_populates="doctors")
+    department = relationship("Department", foreign_keys=[department_id], back_populates="doctors")
+    role = relationship("Role")
 
     phone = Column(String, nullable=True)
     bio = Column(Text, nullable=True)
@@ -109,10 +118,15 @@ class Patient(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
+    assigned_doctor_id = Column(String, ForeignKey("doctors.id"), nullable=True)
     
     # Relationships
     doctor = relationship("Doctor", back_populates="patients")
     diagnoses = relationship("Diagnosis", back_populates="patient", cascade="all, delete-orphan")
+    organization = relationship("Organization", back_populates="patients")
+    assigned_doctor = relationship("Doctor", foreign_keys=[assigned_doctor_id])
     
     # Indexes - Performance optimization
     __table_args__ = (
@@ -520,3 +534,66 @@ class Appointment(Base):
     # Relationships
     patient = relationship("Patient")
     doctor = relationship("Doctor")
+
+
+class Organization(Base):
+    """Hospital/Clinic organization."""
+    __tablename__ = "organizations"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)
+    org_type = Column(String, default="clinic")  # clinic, hospital, private_practice
+    address = Column(Text)
+    phone = Column(String)
+    email = Column(String)
+    website = Column(String)
+    registration_number = Column(String)
+    
+    # Settings
+    logo_url = Column(String)
+    timezone = Column(String, default="UTC")
+    is_active = Column(Boolean, default=True)
+    
+    # Subscription (for future billing)
+    plan = Column(String, default="free")  # free, basic, pro, enterprise
+    max_doctors = Column(Integer, default=5)
+    max_patients = Column(Integer, default=100)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    doctors = relationship("Doctor", back_populates="organization")
+    patients = relationship("Patient", back_populates="organization")
+    departments = relationship("Department", back_populates="organization")
+
+
+class Department(Base):
+    """Departments within organization."""
+    __tablename__ = "departments"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    name = Column(String, nullable=False)  # Cardiology, Emergency, ICU, etc.
+    description = Column(Text)
+    head_doctor_id = Column(String, ForeignKey("doctors.id"), nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    organization = relationship("Organization", back_populates="departments")
+    doctors = relationship("Doctor", foreign_keys="Doctor.department_id", back_populates="department")
+
+
+class Role(Base):
+    """User roles for access control."""
+    __tablename__ = "roles"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False, unique=True)  # admin, doctor, nurse, receptionist
+    description = Column(Text)
+    permissions = Column(JSON)  # {"can_edit_patients": true, "can_delete_diagnoses": false}
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
