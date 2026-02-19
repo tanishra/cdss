@@ -114,9 +114,12 @@ async def register(
     except HTTPException:
         raise
     except Exception as e:
+        await db.rollback()
+        import traceback
         logger.error(
             "registration_error",
             error=str(e),
+            traceback=traceback.format_exc(),
             error_type=type(e).__name__,
             correlation_id=correlation_id,
         )
