@@ -18,7 +18,7 @@ from app.api.auth import router as auth_router
 from app.api.routes import patient_router, diagnosis_router
 from app.api.feedback import router as feedback_router
 from app.api.treatments import router as treatment_router
-from app.api import treatments, clinical, activity, organization, patient_auth, patient_portal
+from app.api import treatments, clinical, activity, organization, patient_auth, patient_portal, symptom_checker
 from app.schemas.schemas import HealthCheck
 from app.utils.correlation import get_correlation_id
 
@@ -180,6 +180,11 @@ app.include_router(
     patient_portal.router,
     prefix="/api/v1/patient-portal",
     tags=["patient-portal"],
+)
+app.include_router(
+    symptom_checker.router,
+    prefix="/api/v1/symptom-checker",
+    tags=["symptom-checker"],
 )
 
 @app.get("/health", response_model=HealthCheck)
