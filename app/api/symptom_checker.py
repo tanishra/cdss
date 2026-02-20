@@ -80,18 +80,18 @@ Provide:
 Format as JSON with: diagnoses (array with diagnosis, confidence, reasoning), immediate_actions (array), red_flags (array)"""
 
         # Get RAG response
-        rag_response = await rag_service.get_diagnosis_with_citations(
+        rag_response = await rag_service.get_diagnosis(
             query=full_context,
-            prompt=prompt,
             doctor_id=current_doctor.id,
-        )
+            enable_rag=True,
+            )
         
         # Parse response
         import json
         import re
         
         # Extract JSON from response
-        json_match = re.search(r'\{.*\}', rag_response['response'], re.DOTALL)
+        json_match = re.search(r'\{.*\}', rag_response['diagnosis'], re.DOTALL)
         if json_match:
             result = json.loads(json_match.group())
         else:
@@ -121,10 +121,12 @@ Format as JSON with: diagnoses (array with diagnosis, confidence, reasoning), im
         }
         
     except Exception as e:
-        logger.error("symptom_analysis_error", error=str(e), correlation_id=correlation_id)
+        import traceback
+        traceback.print_exc()  # Print full error
+        logger.error("symptom_analysis_error", error=str(e), traceback=traceback.format_exc(), correlation_id=correlation_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to analyze symptoms"
+            detail=f"Failed to analyze symptoms: {str(e)}"  # Show actual error
         )
 
 
