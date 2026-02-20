@@ -166,6 +166,87 @@ class RAGService:
             )
             raise RAGServiceError(f"Evidence retrieval failed: {str(e)}") from e
     
+    async def get_diagnosis(
+        self,
+        query: str,
+        doctor_id: str,
+        enable_rag: bool = True,
+        db: Optional[AsyncSession] = None,
+        correlation_id: str = ""
+        ) -> Dict[str, Any]:
+        """
+        Get diagnosis suggestions with optional RAG evidence.
+    
+        Args:
+            query: Symptom description
+            doctor_id: Doctor ID
+            enable_rag: Whether to use RAG (default True)
+            db: Database session (optional)
+            correlation_id: Request tracking ID
+        
+        Returns:
+            Dictionary with diagnosis and citations
+        """
+        try:
+            from openai import OpenAI
+        
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            
+            # Build prompt with evidence if RAG enabled
+            if enable_rag:
+                # Simple keyword extraction for search
+                keywords = query.split()[:10]  # Use first 10 words
+                search_query = " ".join(keywords)
+                
+                # Get evidence from vector DB
+                vector_results = await self._retrieve_from_vectordb(search_query, correlation_id)
+                evidence_text = self.format_evidence_for_llm(vector_results, max_citations=3)
+                
+                prompt = f"""Based on the following symptoms and medical evidence, provide a differential diagnosis.
+
+                            Symptoms: {query}
+
+                            {evidence_text}
+
+                            Provide top 5 differential diagnoses with confidence scores (0-1), reasoning, immediate actions, and red flags.
+
+                            Format as JSON:
+                            {{
+                            "diagnoses": [{{"diagnosis": "...", "confidence": 0.x, "reasoning": "..."}}],
+                            "immediate_actions": ["..."],
+                            "red_flags": ["..."]
+                            }}"""
+            else:
+                
+                prompt = f"""Based on these symptoms: {query}
+
+                Provide top 5 differential diagnoses with confidence scores, immediate actions, and red flags.
+
+                Format as JSON:
+                {{
+                "diagnoses": [{{"diagnosis": "...", "confidence": 0.x, "reasoning": "..."}}],
+                "immediate_actions": ["..."],
+                "red_flags": ["..."]
+                }}"""
+            
+            response = client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7
+                )
+            
+            response_text = response.choices[0].message.content
+            
+            return {
+                "diagnosis": response_text,
+                "citations": vector_results if enable_rag else [],
+                "correlation_id": correlation_id
+            }
+        
+        except Exception as e:
+            logger.error("get_diagnosis_error", error=str(e), correlation_id=correlation_id)
+            raise RAGServiceError(f"Diagnosis generation failed: {str(e)}") from e
+    
     def _build_search_query(
         self,
         chief_complaint: str,
